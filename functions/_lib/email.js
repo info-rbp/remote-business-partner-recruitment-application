@@ -1,19 +1,26 @@
-// Transactional recruitment email helper using Cloudflare Email Service REST API.
+// Transactional recruitment email helper using Google Workspace Gmail API.
 //
-// Required Cloudflare Pages configuration:
-//   CLOUDFLARE_ACCOUNT_ID            normal environment variable
-//   CLOUDFLARE_EMAIL_API_TOKEN       secret with Email Sending: Edit permission
-// Optional overrides:
+// Required Cloudflare Pages secrets:
+//   GOOGLE_GMAIL_CLIENT_ID
+//   GOOGLE_GMAIL_CLIENT_SECRET
+//   GOOGLE_GMAIL_REFRESH_TOKEN
+// Optional normal environment variables:
 //   RECRUITMENT_EMAIL_FROM           defaults to recruitment@remotebusinesspartner.com.au
 //   RECRUITMENT_NOTIFICATION_EMAIL   defaults to recruitment@remotebusinesspartner.com.au
 //   PUBLIC_SITE_URL                  defaults to the production pages.dev hostname
 //
+// The refresh token must belong to the Google Workspace mailbox that is allowed
+// to send as RECRUITMENT_EMAIL_FROM and should have only the gmail.send scope.
 // Email delivery must never determine whether a recruitment form submission is
-// accepted. Call the notify* helpers after the D1/R2 write has succeeded and
-// schedule them with context.waitUntil where available.
+// accepted. Call the notify* helpers only after the D1/R2 write has succeeded.
 
 const DEFAULT_EMAIL = 'recruitment@remotebusinesspartner.com.au';
 const DEFAULT_SITE_URL = 'https://remote-business-partner-recruitment-application.pages.dev';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GMAIL_SEND_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
+
+let cachedAccessToken = null;
+let cachedAccessTokenExpiry = 0;
 
 function esc(value) {
   return String(value ?? '')
@@ -26,8 +33,9 @@ function esc(value) {
 
 function config(env) {
   return {
-    accountId: String(env.CLOUDFLARE_ACCOUNT_ID || '').trim(),
-    apiToken: String(env.CLOUDFLARE_EMAIL_API_TOKEN || '').trim(),
+    clientId: String(env.GOOGLE_GMAIL_CLIENT_ID || '').trim(),
+    clientSecret: String(env.GOOGLE_GMAIL_CLIENT_SECRET || '').trim(),
+    refreshToken: String(env.GOOGLE_GMAIL_REFRESH_TOKEN || '').trim(),
     from: String(env.RECRUITMENT_EMAIL_FROM || DEFAULT_EMAIL).trim(),
     notificationsTo: String(env.RECRUITMENT_NOTIFICATION_EMAIL || DEFAULT_EMAIL).trim(),
     siteUrl: String(env.PUBLIC_SITE_URL || DEFAULT_SITE_URL).replace(/\/$/, '')
@@ -36,49 +44,163 @@ function config(env) {
 
 export function isRecruitmentEmailConfigured(env) {
   const cfg = config(env);
-  return Boolean(cfg.accountId && cfg.apiToken && cfg.from && cfg.notificationsTo);
+  return Boolean(cfg.clientId && cfg.clientSecret && cfg.refreshToken && cfg.from && cfg.notificationsTo);
 }
 
-export async function sendRecruitmentEmail(env, { to, subject, text, html, replyTo }) {
+function cleanHeader(value) {
+  return String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    for (let j = 0; j < chunk.length; j++) binary += String.fromCharCode(chunk[j]);
+  }
+  return btoa(binary);
+}
+
+function base64UrlEncodeUtf8(value) {
+  return bytesToBase64(new TextEncoder().encode(String(value)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function encodeMimeHeader(value) {
+  const clean = cleanHeader(value);
+  if (/^[\x20-\x7E]*$/.test(clean)) return clean;
+  return `=?UTF-8?B?${bytesToBase64(new TextEncoder().encode(clean))}?=`;
+}
+
+function normaliseBody(value) {
+  return String(value ?? '').replace(/\r?\n/g, '\r\n');
+}
+
+function buildRawMessage({ from, to, subject, text, html, replyTo }) {
+  const boundary = `rbp_${crypto.randomUUID().replace(/-/g, '')}`;
+  const headers = [
+    `From: Remote Business Partner <${cleanHeader(from)}>`,
+    `To: ${cleanHeader(to)}`,
+    `Subject: ${encodeMimeHeader(subject)}`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/alternative; boundary="${boundary}"`
+  ];
+  if (replyTo) headers.splice(2, 0, `Reply-To: ${cleanHeader(replyTo)}`);
+
+  const message = [
+    ...headers,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    normaliseBody(text),
+    `--${boundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    normaliseBody(html),
+    `--${boundary}--`,
+    ''
+  ].join('\r\n');
+
+  return base64UrlEncodeUtf8(message);
+}
+
+async function getGmailAccessToken(env, forceRefresh = false) {
   const cfg = config(env);
-  if (!cfg.accountId || !cfg.apiToken) {
-    console.warn('Recruitment email skipped: CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_EMAIL_API_TOKEN is not configured.');
-    return { skipped: true };
+  if (!cfg.clientId || !cfg.clientSecret || !cfg.refreshToken) {
+    return null;
   }
 
-  const payload = {
-    to,
-    from: cfg.from,
-    subject,
-    text,
-    html
-  };
-  // Cloudflare Email Service REST API uses reply_to. The Workers binding uses replyTo.
-  if (replyTo) payload.reply_to = replyTo;
+  const now = Date.now();
+  if (!forceRefresh && cachedAccessToken && now < cachedAccessTokenExpiry - 60_000) {
+    return cachedAccessToken;
+  }
 
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfg.accountId)}/email/sending/send`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${cfg.apiToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    }
-  );
+  const form = new URLSearchParams({
+    client_id: cfg.clientId,
+    client_secret: cfg.clientSecret,
+    refresh_token: cfg.refreshToken,
+    grant_type: 'refresh_token'
+  });
+
+  const response = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form.toString()
+  });
 
   let body = null;
   try { body = await response.json(); } catch { /* ignore malformed upstream body */ }
 
-  if (!response.ok || (body && body.success === false)) {
-    const upstream = body && body.errors && body.errors.length
-      ? body.errors.map(e => e.message || e.code).join('; ')
+  if (!response.ok || !body || !body.access_token) {
+    const detail = body && (body.error_description || body.error)
+      ? `${body.error || 'oauth_error'}: ${body.error_description || ''}`.trim()
       : `HTTP ${response.status}`;
-    throw new Error(`Cloudflare Email Service rejected the message: ${upstream}`);
+    throw new Error(`Google OAuth token refresh failed: ${detail}`);
   }
 
-  return body && body.result ? body.result : { sent: true };
+  cachedAccessToken = body.access_token;
+  const expiresInSeconds = Number(body.expires_in) > 0 ? Number(body.expires_in) : 3600;
+  cachedAccessTokenExpiry = now + expiresInSeconds * 1000;
+  return cachedAccessToken;
+}
+
+async function gmailSend(env, raw, retry = true) {
+  const token = await getGmailAccessToken(env, !retry);
+  if (!token) {
+    console.warn('Recruitment email skipped: Google Workspace Gmail OAuth secrets are not configured.');
+    return { skipped: true };
+  }
+
+  const response = await fetch(GMAIL_SEND_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ raw })
+  });
+
+  if (response.status === 401 && retry) {
+    cachedAccessToken = null;
+    cachedAccessTokenExpiry = 0;
+    return gmailSend(env, raw, false);
+  }
+
+  let body = null;
+  try { body = await response.json(); } catch { /* ignore malformed upstream body */ }
+
+  if (!response.ok) {
+    const detail = body && body.error && body.error.message
+      ? body.error.message
+      : `HTTP ${response.status}`;
+    throw new Error(`Gmail API rejected the message: ${detail}`);
+  }
+
+  return body || { sent: true };
+}
+
+export async function sendRecruitmentEmail(env, { to, subject, text, html, replyTo }) {
+  const cfg = config(env);
+  if (!isRecruitmentEmailConfigured(env)) {
+    console.warn('Recruitment email skipped: GOOGLE_GMAIL_CLIENT_ID, GOOGLE_GMAIL_CLIENT_SECRET or GOOGLE_GMAIL_REFRESH_TOKEN is not configured.');
+    return { skipped: true };
+  }
+
+  const raw = buildRawMessage({
+    from: cfg.from,
+    to,
+    subject,
+    text,
+    html,
+    replyTo
+  });
+
+  return gmailSend(env, raw);
 }
 
 async function settle(label, jobs) {

@@ -1,168 +1,219 @@
-# DEPLOYMENT — Remote Business Partner (Cloudflare Pages + Functions + D1 + R2 + Firebase)
+# DEPLOYMENT — Remote Business Partner
 
-**Status: this code has never been run.** This GenSpark editor cannot create
-a Cloudflare account, a Firebase project, a D1 database, an R2 bucket, or a
-Turnstile widget, and cannot run `npm install` / `wrangler`. Everything below
-must be carried out by a developer with real Cloudflare + Firebase account
-access. See `PRELAUNCH_BLOCKERS.md` for the checklist of what is still
-outstanding, and do not skip the acceptance tests in that document.
+The application is designed for **Cloudflare Pages + Pages Functions + D1 +
+private R2 + Firebase Authentication + Cloudflare Turnstile**.
 
-## 1. Cloudflare
+The public site can deploy before every backend service is configured, but the
+public forms intentionally fail closed until Turnstile is configured, and staff
+sign-in intentionally fails until Firebase is configured.
 
-### 1.1 Create D1 databases
+## 1. Cloudflare Pages
 
-```
+Connect the GitHub repository to a Cloudflare Pages project.
+
+Recommended settings:
+
+- Production branch: `main`
+- Framework preset: None
+- Root directory: repository root
+- Build command: install dependencies as required by the Pages build environment
+- Functions directory: `/functions` (detected automatically by Pages)
+
+The repository contains Pages Functions under `/functions/api/*`.
+
+## 2. D1
+
+Create the production database:
+
+```bash
 wrangler d1 create rbp-recruitment
+```
+
+Optionally create a separate preview/testing database:
+
+```bash
 wrangler d1 create rbp-recruitment-preview
 ```
 
-Note the `database_id` values returned and put them into your real
-`wrangler.toml` (copied from `wrangler.toml.example` in this repo).
+Apply the schema migration:
 
-### 1.2 Apply the migration
-
-```
+```bash
 wrangler d1 migrations apply rbp-recruitment --remote
-wrangler d1 migrations apply rbp-recruitment-preview --remote
 ```
 
-This runs `migrations/0001_initial.sql`, creating `vacancies`, `applications`,
-`recruitment_requests`, `candidate_interest`, `staff_users`, and all required
-indexes.
+The migration creates:
 
-### 1.3 Create the private R2 bucket
+- `vacancies`
+- `applications`
+- `recruitment_requests`
+- `candidate_interest`
+- `staff_users`
 
+Bind the production D1 database to the Pages project with the binding name:
+
+```text
+DB
 ```
+
+## 3. Private R2 CV storage
+
+Create the bucket:
+
+```bash
 wrangler r2 bucket create rbp-recruitment-cvs
 ```
 
-Confirm in the Cloudflare dashboard that:
-- Public access is **disabled**
-- No public development URL has been enabled
-- No public custom domain is attached to this bucket
+Bind it to Pages with:
 
-CVs are only ever retrieved through the authenticated
-`GET /api/admin/applications/:id/cv` endpoint (see `functions/api/admin/applications/[id]/cv.js`),
-which streams the object server-side after verifying the caller is an
-approved staff user. No R2 credentials are ever exposed to the browser.
-
-### 1.4 Bind D1 and R2 to the Pages project
-
-In `wrangler.toml`:
-
-```toml
-[[d1_databases]]
-binding = "DB"
-database_name = "rbp-recruitment"
-database_id = "<from step 1.1>"
-
-[[r2_buckets]]
-binding = "CV_BUCKET"
-bucket_name = "rbp-recruitment-cvs"
+```text
+CV_BUCKET
 ```
 
-...and the matching `[env.preview.*]` sections pointing at the preview
-database, per `wrangler.toml.example`. Pages Functions access these
-exclusively through `context.env.DB` / `context.env.CV_BUCKET` — never
-through public credentials embedded anywhere in this codebase.
+The bucket must remain private:
 
-### 1.5 Configure environment variables and secrets
+- Public access: OFF
+- Public development URL: OFF
+- Public custom domain: none
 
-Plain vars (`[vars]` in `wrangler.toml`):
-- `FIREBASE_PROJECT_ID` — your Firebase project ID
-- `BUSINESS_TIMEZONE` — `Australia/Perth` for this deployment (used by
-  `getCurrentBusinessDate()` in `functions/_lib/database.js` to determine
-  vacancy deadlines using RBP's business timezone, never the visitor's
-  browser clock)
+CVs are downloaded only through the authenticated endpoint:
 
-Secrets (never in a file — set via CLI):
+```text
+GET /api/admin/applications/:id/cv
 ```
+
+## 4. Cloudflare environment variables
+
+Configure these normal Pages environment variables:
+
+```text
+BUSINESS_TIMEZONE=Australia/Perth
+FIREBASE_PROJECT_ID=<firebase-project-id>
+TURNSTILE_SITE_KEY=<public-turnstile-site-key>
+TURNSTILE_ALLOWED_HOSTNAMES=remote-business-partner-recruitment-application.pages.dev
+```
+
+When a custom domain is added, include it in
+`TURNSTILE_ALLOWED_HOSTNAMES` as a comma-separated hostname.
+
+Example:
+
+```text
+TURNSTILE_ALLOWED_HOSTNAMES=remote-business-partner-recruitment-application.pages.dev,recruitment.remotebusinesspartner.com.au
+```
+
+## 5. Cloudflare Turnstile
+
+Create a **Managed** Turnstile widget in the Cloudflare dashboard for the
+production hostname.
+
+The application protects three public actions:
+
+| Form | Turnstile action |
+|---|---|
+| Job application | `job_application` |
+| Candidate registration | `candidate_interest` |
+| Employer recruitment request | `recruitment_request` |
+
+The public **site key** is not hard-coded into GitHub. Set it as:
+
+```text
+TURNSTILE_SITE_KEY
+```
+
+The browser retrieves that safe public value through:
+
+```text
+GET /api/config
+```
+
+Store the Turnstile **secret key** only as a Cloudflare Pages secret:
+
+```bash
 wrangler pages secret put TURNSTILE_SECRET_KEY
-wrangler pages secret put TURNSTILE_SECRET_KEY --env preview
 ```
 
-### 1.6 Configure Cloudflare Turnstile
+Do not commit the secret key to GitHub.
 
-1. Create a Turnstile widget in the Cloudflare dashboard for your production
-   (and preview) domain(s).
-2. Put the **site key** (public) into the three public forms — job
-   application, Register Your Interest, Start Recruitment — where the
-   frontend renders the Turnstile widget (see `js/api.js` / the relevant
-   page scripts, marked `TURNSTILE_SITE_KEY`).
-3. Set the **secret key** as `TURNSTILE_SECRET_KEY` per step 1.5. Never put
-   it in any file that ships to the browser.
-4. For local/dev testing, use Cloudflare's published Turnstile testing keys
-   rather than disabling verification in code — there is no
-   environment-conditional bypass anywhere in `functions/_lib/turnstile.js`,
-   and none should be added.
+`functions/_lib/turnstile.js` verifies the token server-side and also validates:
 
-### 1.7 Deploy Pages + Functions
+- expected action
+- approved hostname(s), when `TURNSTILE_ALLOWED_HOSTNAMES` is configured
 
-Pages Functions require a Git-connected Pages project or a Wrangler-based
-deploy — a plain dashboard "Direct Upload" does not support Functions.
+For local/testing work, use Cloudflare's official Turnstile testing keys rather
+than bypassing verification in code.
 
+## 6. Firebase Authentication
+
+Firebase is used **only for staff authentication**. The application does not
+require Firebase Hosting, Firestore or Firebase Storage.
+
+1. Create/configure a Firebase project.
+2. Enable Email/Password authentication.
+3. Create a Firebase Web App.
+4. Copy the public Firebase web configuration into `js/firebase-config.js`,
+   replacing every `REPLACE_ME` value.
+5. Set Cloudflare `FIREBASE_PROJECT_ID` to exactly the same project ID.
+6. Add the Pages production/custom domain to Firebase Authorized domains.
+7. Manually create staff accounts in Firebase Authentication.
+8. Record each staff user's Firebase UID.
+9. Insert each approved UID into the D1 `staff_users` table.
+
+Example:
+
+```sql
+INSERT INTO staff_users (
+  id, firebase_uid, email, display_name, role, active, created_at, updated_at
+) VALUES (
+  '<uuid>',
+  '<firebase-uid>',
+  '<staff-email>',
+  '<staff-name>',
+  'admin',
+  1,
+  '<iso-timestamp>',
+  '<iso-timestamp>'
+);
 ```
-npm install
-npm run prelaunch     # must pass before deploying — see scripts/prelaunch-check.mjs
-npm run deploy        # wrangler pages deploy .
+
+A valid Firebase user is not enough by itself. The backend also requires an
+active matching `staff_users` record.
+
+## 7. Privacy
+
+`privacy.html` contains the recruitment privacy policy used by the application.
+The public forms include short collection notices linking to that policy.
+
+Before final production use, confirm that the published RBP identity and any
+legal entity/business details are correct for the organisation operating the
+service.
+
+## 8. Testing before real candidate data
+
+Run the repository's static check:
+
+```bash
+npm run prelaunch
 ```
 
-or connect this repository to a Cloudflare Pages project via Git and let
-Cloudflare build/deploy on push, with the same bindings/secrets configured
-in the Pages dashboard.
+Then complete the acceptance checklist in `PRELAUNCH_BLOCKERS.md`, including:
 
-## 2. Firebase (staff authentication only)
+- public vacancy security
+- staff authentication
+- Turnstile action/hostname enforcement
+- CV upload/storage/download
+- privacy acknowledgement storage
+- the full vacancy-to-application workflow
 
-Firebase is used **only** for staff Email/Password authentication. Do not
-introduce Firestore, Firebase Storage, or Firebase Hosting for this project.
+## 9. GitHub / Cloudflare workflow
 
-1. Create a Firebase project (console.firebase.google.com).
-2. Authentication → Sign-in method → enable **Email/Password** only. Do not
-   enable any other sign-in provider for V1 (no Google Sign-In, no
-   candidate/employer login).
-3. Authentication → Settings → Authorized domains → add your Cloudflare
-   Pages production and preview domains.
-4. Authentication → Users → manually create one account per staff member.
-   There is no public registration UI anywhere in this codebase — accounts
-   are created here, by an administrator, only.
-5. For each staff account, note the Firebase UID shown in the console, then
-   insert a matching row into `staff_users`:
+Cloudflare Pages is connected to the GitHub `main` branch. Changes pushed to
+`main` should trigger a Pages deployment.
 
-   ```sql
-   INSERT INTO staff_users (
-       id, firebase_uid, email, display_name, role, active, created_at, updated_at
-   ) VALUES (
-       '<generated-uuid>',
-       '<actual-firebase-uid>',
-       '<actual-staff-email>',
-       '<actual-name>',
-       'admin',
-       1,
-       '<current-iso-timestamp>',
-       '<current-iso-timestamp>'
-   );
-   ```
+Use GitHub as the source of truth for application code. Do not commit:
 
-6. Project Settings → General → Web app config (`apiKey`, `authDomain`,
-   `projectId`, `appId`) — paste the public values into `login.html` and
-   `admin.html` where marked `FIREBASE_CONFIG`. These are public by design.
-7. Project Settings → Service accounts → do **not** download or commit the
-   service-account JSON. `functions/_lib/auth.js` verifies ID tokens using
-   Firebase's publicly published signing keys.
-8. Test sign-in with approved and unapproved accounts, password reset, and sign-out.
-
-## 3. Testing
-
-1. Run the pre-launch static check:
-   ```
-   npm run prelaunch
-   ```
-2. Execute every acceptance test listed in `PRELAUNCH_BLOCKERS.md` §4
-   against the real deployed instance.
-3. Verify preview deployments do not use production D1/R2 resources.
-
-## 4. What "done" looks like
-
-Do not describe this application as production-ready until every box in the
-Definition of Done can be truthfully checked, including that the acceptance
-tests above have actually been run against a real deployment.
+- Firebase service-account keys
+- Turnstile secret keys
+- Cloudflare API tokens
+- candidate CVs
+- real candidate or employer records
+- `.env` or local secret files

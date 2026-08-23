@@ -1,5 +1,7 @@
 /* ===========================================================
    Staff login page logic (Firebase Authentication, email/password only).
+   Firebase authentication and RBP staff authorisation are deliberately
+   separate checks. A valid Firebase account must also be approved in D1.
    =========================================================== */
 
 // Firebase Authorized Domains should use the stable production hostname, not
@@ -21,6 +23,7 @@ const configWarning = document.getElementById('configWarning');
 const loginForm = document.getElementById('loginForm');
 const loginError = document.getElementById('loginError');
 const loginSubmitBtn = document.getElementById('loginSubmitBtn');
+let staffVerificationInProgress = false;
 
 if (!RbpApi.isFirebaseConfigured()) {
   configWarning.classList.remove('hidden');
@@ -55,8 +58,49 @@ function authErrorMessage(err) {
   }
 }
 
+function resetSubmitButton() {
+  loginSubmitBtn.disabled = false;
+  loginSubmitBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Sign In';
+}
+
+async function verifyStaffAccess(user) {
+  if (!user || staffVerificationInProgress) return;
+  staffVerificationInProgress = true;
+  loginError.classList.add('hidden');
+  loginSubmitBtn.disabled = true;
+  loginSubmitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Verifying staff access...';
+
+  try {
+    await RbpApi.adminGetSession();
+    window.location.href = 'admin.html';
+  } catch (err) {
+    console.error('RBP staff authorisation failed:', err);
+    const uid = user.uid || '(UID unavailable)';
+
+    // Remove the valid Firebase session after an RBP authorisation failure so
+    // returning to the login page does not immediately send the user back into
+    // the same redirect cycle.
+    await RbpApi.signOutStaff();
+
+    if (err && err.status === 403) {
+      loginError.textContent = `Your Firebase login was accepted, but this account is not yet approved for RBP Recruitment Administration. Firebase UID: ${uid}`;
+    } else if (err && err.status === 401) {
+      loginError.textContent = 'Your Firebase login was accepted, but the server could not verify the Firebase token. Confirm Cloudflare FIREBASE_PROJECT_ID is set to business-plan-applicatio-17047 and redeploy the Pages project.';
+    } else {
+      loginError.textContent = `Firebase login succeeded, but RBP staff access could not be verified. ${err && err.message ? err.message : 'Please try again.'}`;
+    }
+
+    loginError.classList.remove('hidden');
+    resetSubmitButton();
+  } finally {
+    staffVerificationInProgress = false;
+  }
+}
+
+// Existing Firebase sessions must be authorised by the RBP server before the
+// browser is allowed into the administration interface.
 RbpApi.onAuthStateChanged((user) => {
-  if (user) window.location.href = 'admin.html';
+  if (user) verifyStaffAccess(user);
 });
 
 loginForm.addEventListener('submit', async (e) => {
@@ -70,19 +114,21 @@ loginForm.addEventListener('submit', async (e) => {
 
   const email = document.getElementById('loginEmail').value.trim();
   const password = document.getElementById('loginPassword').value;
-  const btn = loginSubmitBtn;
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Signing in...';
+  loginSubmitBtn.disabled = true;
+  loginSubmitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Signing in...';
 
   try {
-    await RbpApi.signIn(email, password);
-    window.location.href = 'admin.html';
+    const user = await RbpApi.signIn(email, password);
+    await verifyStaffAccess(user);
   } catch (err) {
-    console.error('Firebase sign-in failed:', err);
-    loginError.textContent = authErrorMessage(err);
-    loginError.classList.remove('hidden');
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Sign In';
+    // If verifyStaffAccess handled a server-side authorisation failure it has
+    // already displayed the useful error message.
+    if (loginError.classList.contains('hidden')) {
+      console.error('Firebase sign-in failed:', err);
+      loginError.textContent = authErrorMessage(err);
+      loginError.classList.remove('hidden');
+      resetSubmitButton();
+    }
   }
 });
 

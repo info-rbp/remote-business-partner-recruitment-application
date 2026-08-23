@@ -1,10 +1,11 @@
-import { first, run, nowIso } from '../../../_lib/database.js';
+import { run, nowIso } from '../../../_lib/database.js';
+import { getActiveRecord, softDeleteRecord } from '../../../_lib/retention.js';
 import { ok, notFound, validationError, safeHandler } from '../../../_lib/responses.js';
 import { oneOf, INTEREST_STATUSES } from '../../../_lib/validation.js';
 
 export async function onRequestGet({ env, params }) {
   return safeHandler(async () => {
-    const row = await first(env, 'SELECT * FROM candidate_interest WHERE id = ?', [params.id]);
+    const row = await getActiveRecord(env, 'candidate_interest', params.id);
     if (!row) return notFound();
     return ok(row);
   });
@@ -12,7 +13,7 @@ export async function onRequestGet({ env, params }) {
 
 export async function onRequestPatch({ request, env, params }) {
   return safeHandler(async () => {
-    const existing = await first(env, 'SELECT * FROM candidate_interest WHERE id = ?', [params.id]);
+    const existing = await getActiveRecord(env, 'candidate_interest', params.id);
     if (!existing) return notFound();
 
     const body = await request.json().catch(() => ({}));
@@ -25,5 +26,18 @@ export async function onRequestPatch({ request, env, params }) {
 
     await run(env, 'UPDATE candidate_interest SET status = ?, updated_at = ? WHERE id = ?', [body.status, nowIso(), params.id]);
     return ok({ id: params.id });
+  });
+}
+
+export async function onRequestDelete({ env, params, data }) {
+  return safeHandler(async () => {
+    const deleted = await softDeleteRecord(
+      env,
+      'candidate_interest',
+      params.id,
+      data && data.staffUser ? data.staffUser.email : null
+    );
+    if (!deleted) return notFound();
+    return ok({ id: params.id, deleted: true, purge_after_days: 30 });
   });
 }

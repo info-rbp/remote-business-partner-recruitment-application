@@ -93,9 +93,33 @@ const closeSuccessBtn = document.getElementById('closeSuccessBtn');
 const applicationForm = document.getElementById('applicationForm');
 const applySuccess = document.getElementById('applySuccess');
 const submitBtn = document.getElementById('submitAppBtn');
+const verificationContainer = document.getElementById('applyTurnstile');
 
 let lastFocusedEl = null;
 let applicationTurnstileRendered = false;
+
+function getVerificationIssueEl() {
+  let el = document.getElementById('applyVerificationIssue');
+  if (!el) {
+    el = document.createElement('p');
+    el.id = 'applyVerificationIssue';
+    el.className = 'hidden text-xs text-red-600 text-center mt-2 leading-relaxed';
+    verificationContainer.insertAdjacentElement('afterend', el);
+  }
+  return el;
+}
+
+function clearVerificationIssue() {
+  const el = getVerificationIssueEl();
+  el.textContent = '';
+  el.classList.add('hidden');
+}
+
+function showVerificationIssue(message) {
+  const el = getVerificationIssueEl();
+  el.textContent = message;
+  el.classList.remove('hidden');
+}
 
 function setVerificationPending(label = 'Verifying...') {
   submitBtn.disabled = true;
@@ -104,6 +128,7 @@ function setVerificationPending(label = 'Verifying...') {
 }
 
 function setVerificationReady() {
+  clearVerificationIssue();
   submitBtn.disabled = false;
   submitBtn.classList.remove('opacity-60', 'cursor-not-allowed');
   submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Submit Application';
@@ -111,6 +136,7 @@ function setVerificationReady() {
 
 async function prepareApplicationVerification() {
   setVerificationPending();
+  clearVerificationIssue();
   try {
     if (applicationTurnstileRendered) {
       RbpApi.resetTurnstile('applyTurnstile');
@@ -121,11 +147,20 @@ async function prepareApplicationVerification() {
       onSuccess: token => {
         if (token) setVerificationReady();
       },
-      onExpired: () => setVerificationPending('Verification expired'),
-      onTimeout: () => setVerificationPending('Retry verification'),
-      onError: code => {
+      onExpired: () => {
+        setVerificationPending('Verification expired');
+        showVerificationIssue('Verification expired. Please complete the security check again.');
+      },
+      onTimeout: () => {
         setVerificationPending('Retry verification');
-        console.error('Application verification error:', code);
+        showVerificationIssue('Verification timed out. Please retry the security check.');
+      },
+      onError: code => {
+        const message = RbpApi.describeTurnstileError(code);
+        const isHostnameError = String(code || '').startsWith('110200') || code === 'hostname_not_allowed_by_server_config';
+        setVerificationPending(isHostnameError ? 'Verification configuration error' : 'Retry verification');
+        showVerificationIssue(message);
+        console.error('Application verification error:', code, message);
       }
     });
     applicationTurnstileRendered = true;
@@ -133,8 +168,9 @@ async function prepareApplicationVerification() {
     if (RbpApi.getTurnstileToken('applyTurnstile')) setVerificationReady();
   } catch (err) {
     console.error('Application verification could not be prepared:', err);
+    const message = RbpApi.getTurnstileErrorMessage('applyTurnstile') || err.message || 'Verification could not be loaded.';
     setVerificationPending('Verification unavailable');
-    RBP.toast('Verification could not be loaded. Please refresh the page and try again.', 'error');
+    showVerificationIssue(message);
   }
 }
 
@@ -144,6 +180,7 @@ function openModal() {
   applicationForm.classList.remove('hidden');
   applySuccess.classList.add('hidden');
   setVerificationPending();
+  clearVerificationIssue();
   applyModal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
   const firstField = document.getElementById('fullName');
@@ -200,14 +237,24 @@ applicationForm.addEventListener('submit', async (e) => {
   }
 
   if (!RbpApi.isTurnstileConfigured('applyTurnstile')) {
-    RBP.toast('This form cannot be submitted until deployment configuration is complete. Please contact us directly.', 'error');
+    const message = RbpApi.getTurnstileErrorMessage('applyTurnstile') || 'This form cannot be submitted until verification configuration is complete.';
+    showVerificationIssue(message);
+    RBP.toast(message, 'error');
     return;
   }
+
   const turnstileToken = RbpApi.getTurnstileToken('applyTurnstile');
   if (!turnstileToken) {
-    setVerificationPending('Complete verification');
-    RbpApi.resetTurnstile('applyTurnstile');
-    RBP.toast('Verification is still required. Complete the verification shown above, then submit again.', 'error');
+    const verificationError = RbpApi.getTurnstileErrorMessage('applyTurnstile');
+    setVerificationPending(verificationError ? 'Verification unavailable' : 'Complete verification');
+    if (verificationError) {
+      showVerificationIssue(verificationError);
+      RBP.toast(verificationError, 'error');
+    } else {
+      RbpApi.resetTurnstile('applyTurnstile');
+      showVerificationIssue('Verification is still required. Complete the security check above, then submit again.');
+      RBP.toast('Verification is still required. Complete the verification shown above, then submit again.', 'error');
+    }
     return;
   }
 

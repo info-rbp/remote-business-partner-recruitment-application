@@ -1,13 +1,15 @@
-// POST /api/candidate-interest — public JSON endpoint (spec item 36, 44).
+// POST /api/candidate-interest — public JSON endpoint.
 // There is no public GET for this resource — admin-only retrieval lives
 // under /api/admin/candidate-interest.
 
 import { newId, nowIso, run } from '../_lib/database.js';
 import { verifyTurnstile } from '../_lib/turnstile.js';
 import { validateCandidateInterestFields } from '../_lib/validation.js';
+import { notifyCandidateInterest, deferEmail } from '../_lib/email.js';
 import { created, validationError, forbidden, safeHandler } from '../_lib/responses.js';
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost(context) {
+  const { request, env } = context;
   return safeHandler(async () => {
     const body = await request.json().catch(() => ({}));
     const {
@@ -32,6 +34,18 @@ export async function onRequestPost({ request, env }) {
         status, privacy_acknowledged, privacy_acknowledged_at, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'New', 1, ?, ?, ?)
     `, [id, name, candidateEmail, phone || null, linkedin_url || null, preferred_roles || null, preferred_location || null, message || null, timestamp, timestamp, timestamp]);
+
+    deferEmail(context, notifyCandidateInterest(env, {
+      id,
+      name,
+      email: candidateEmail,
+      phone: phone || null,
+      linkedin_url: linkedin_url || null,
+      preferred_roles: preferred_roles || null,
+      preferred_location: preferred_location || null,
+      message: message || null,
+      created_at: timestamp
+    }));
 
     return created({ id, status: 'New' });
   });

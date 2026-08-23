@@ -4,13 +4,15 @@
    separate checks. A valid Firebase account must also be approved in D1.
    =========================================================== */
 
-// Firebase Authorized Domains should use the stable production hostname, not
-// Cloudflare's per-deployment hash hostnames. If a staff member opens a
-// deployment URL from the Cloudflare dashboard, move them to production before
-// authentication begins. Custom domains are left untouched.
+// Firebase Authorized Domains should use the stable custom production hostname,
+// not Cloudflare's per-deployment hash hostnames. If a staff member opens a
+// hashed deployment URL from the Cloudflare dashboard, move them to the custom
+// production domain before authentication begins. The canonical pages.dev host
+// remains usable as a platform fallback.
 (() => {
-  const productionHost = 'remote-business-partner-recruitment-application.pages.dev';
-  const deploymentSuffix = `.${productionHost}`;
+  const productionHost = 'recruitment.remotebusinesspartner.com.au';
+  const pagesHost = 'remote-business-partner-recruitment-application.pages.dev';
+  const deploymentSuffix = `.${pagesHost}`;
   if (window.location.hostname.endsWith(deploymentSuffix)) {
     const target = `https://${productionHost}${window.location.pathname}${window.location.search}${window.location.hash}`;
     window.location.replace(target);

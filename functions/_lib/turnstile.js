@@ -1,6 +1,6 @@
 const SITEVERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 
-export async function verifyTurnstile(env, token, remoteip) {
+export async function verifyTurnstile(env, token, remoteip, expectedAction) {
   if (!token || typeof token !== 'string') {
     return { success: false, reason: 'missing_token' };
   }
@@ -23,5 +23,21 @@ export async function verifyTurnstile(env, token, remoteip) {
     return { success: false, reason: 'siteverify_unreachable' };
   }
 
-  return { success: !!json.success, reason: json['error-codes'] || null };
+  if (!json.success) return { success: false, reason: json['error-codes'] || 'verification_failed' };
+
+  if (expectedAction && json.action !== expectedAction) {
+    console.error(`Turnstile action mismatch. Expected ${expectedAction}, received ${json.action || '(none)'}.`);
+    return { success: false, reason: 'action_mismatch' };
+  }
+
+  const allowedHostnames = String(env.TURNSTILE_ALLOWED_HOSTNAMES || '')
+    .split(',')
+    .map(v => v.trim())
+    .filter(Boolean);
+  if (allowedHostnames.length && !allowedHostnames.includes(json.hostname)) {
+    console.error(`Turnstile hostname rejected: ${json.hostname || '(none)'}.`);
+    return { success: false, reason: 'hostname_mismatch' };
+  }
+
+  return { success: true, hostname: json.hostname || null, action: json.action || null };
 }

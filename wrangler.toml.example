@@ -23,8 +23,8 @@ database_id = "9e9d4e61-eb82-456e-a031-d82c58aa5b39"
 # ----------------------------------------------------------------------------
 # Production R2 bucket
 # ----------------------------------------------------------------------------
-# Create this bucket separately and keep it private. Candidate CV files are
-# accessed only through authenticated Pages Functions as `env.CV_BUCKET`.
+# Keep this bucket private. Candidate CV files are accessed only through
+# authenticated Pages Functions as `env.CV_BUCKET`.
 [[r2_buckets]]
 binding = "CV_BUCKET"
 bucket_name = "rbp-recruitment-cvs"
@@ -33,13 +33,20 @@ bucket_name = "rbp-recruitment-cvs"
 # Public/non-secret runtime variables
 # ----------------------------------------------------------------------------
 [vars]
-FIREBASE_PROJECT_ID = "REPLACE_WITH_FIREBASE_PROJECT_ID"
+FIREBASE_PROJECT_ID = "business-plan-applicatio-17047"
 BUSINESS_TIMEZONE = "Australia/Perth"
 TURNSTILE_SITE_KEY = "REPLACE_WITH_TURNSTILE_SITE_KEY"
 TURNSTILE_ALLOWED_HOSTNAMES = "remote-business-partner-recruitment-application.pages.dev"
+CLOUDFLARE_ACCOUNT_ID = "REPLACE_WITH_CLOUDFLARE_ACCOUNT_ID"
+RECRUITMENT_EMAIL_FROM = "recruitment@remotebusinesspartner.com.au"
+RECRUITMENT_NOTIFICATION_EMAIL = "recruitment@remotebusinesspartner.com.au"
+PUBLIC_SITE_URL = "https://remote-business-partner-recruitment-application.pages.dev"
 
-# Secrets are never committed. Configure TURNSTILE_SECRET_KEY as an encrypted
-# Cloudflare Pages secret in the dashboard.
+# Secrets are never committed. Configure both of these as encrypted Cloudflare
+# Pages secrets in the dashboard:
+#   TURNSTILE_SECRET_KEY
+#   CLOUDFLARE_EMAIL_API_TOKEN
+# The email token should be scoped to Email Sending: Edit only.
 
 # ----------------------------------------------------------------------------
 # Preview environment
@@ -58,7 +65,11 @@ binding = "CV_BUCKET"
 bucket_name = "rbp-recruitment-cvs-preview"
 
 [env.preview.vars]
-FIREBASE_PROJECT_ID = "REPLACE_WITH_FIREBASE_PROJECT_ID"
+FIREBASE_PROJECT_ID = "business-plan-applicatio-17047"
 BUSINESS_TIMEZONE = "Australia/Perth"
 TURNSTILE_SITE_KEY = "REPLACE_WITH_PREVIEW_TURNSTILE_SITE_KEY"
 TURNSTILE_ALLOWED_HOSTNAMES = ""
+CLOUDFLARE_ACCOUNT_ID = "REPLACE_WITH_CLOUDFLARE_ACCOUNT_ID"
+RECRUITMENT_EMAIL_FROM = "recruitment@remotebusinesspartner.com.au"
+RECRUITMENT_NOTIFICATION_EMAIL = "recruitment@remotebusinesspartner.com.au"
+PUBLIC_SITE_URL = "https://remote-business-partner-recruitment-application.pages.dev"

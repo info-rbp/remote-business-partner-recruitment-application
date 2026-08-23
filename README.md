@@ -2,7 +2,7 @@
 
 A lightweight recruitment website and staff administration application for **Remote Business Partner**.
 
-The application is deliberately small and conventional. It provides the public recruitment journey, vacancy/application management, employer recruitment requests and candidate-interest registrations without adding AI, a client portal, a candidate account system or other unnecessary platform complexity.
+The application provides the public recruitment journey, vacancy/application management, employer recruitment requests, candidate-interest registrations, secure staff administration and transactional recruitment email without adding AI-driven candidate decisions or public user accounts.
 
 ## Public application
 
@@ -11,7 +11,7 @@ The application is deliberately small and conventional. It provides the public r
 - **Vacancy Detail** — full job advertisement and secure candidate application with CV upload
 - **For Candidates** — candidate value proposition, recruitment process and Register Your Interest form
 - **For Employers** — fixed-fee recruitment proposition and Start Recruitment form
-- **Privacy Policy** — privacy information and explicit pre-launch legal-information gaps
+- **Privacy Policy** — recruitment privacy information
 - **Staff Login** — Firebase Email/Password authentication for approved staff only
 
 ## Staff administration
@@ -25,6 +25,7 @@ The authenticated administration area provides:
 - Internal application notes
 - Employer recruitment requests and full request detail
 - Candidate-interest registrations
+- Soft deletion for employer requests and candidate-interest records
 
 ## Architecture
 
@@ -42,6 +43,8 @@ Cloudflare Pages Functions
    +--> private R2 CV bucket
    |
    +--> Cloudflare Turnstile validation
+   |
+   +--> Google Workspace Gmail API
 
 Staff Browser
    |
@@ -67,6 +70,7 @@ Staff Browser
 | CV/document storage | Private Cloudflare R2 |
 | Staff authentication | Firebase Authentication, Email/Password only |
 | Public form protection | Cloudflare Turnstile |
+| Transactional recruitment email | Google Workspace Gmail API |
 
 Firebase is used **only for staff authentication**. The project does not require Firebase Hosting, Firestore or Firebase Storage.
 
@@ -86,6 +90,8 @@ Firebase is used **only for staff authentication**. The project does not require
 ├── js/
 ├── functions/
 │   ├── _lib/
+│   │   ├── email.js
+│   │   └── retention.js
 │   └── api/
 │       ├── vacancies/
 │       ├── applications.js
@@ -93,7 +99,8 @@ Firebase is used **only for staff authentication**. The project does not require
 │       ├── recruitment-requests.js
 │       └── admin/
 ├── migrations/
-│   └── 0001_initial.sql
+│   ├── 0001_initial.sql
+│   └── 0002_retention_soft_delete.sql
 ├── scripts/
 │   └── prelaunch-check.mjs
 ├── DEPLOYMENT.md
@@ -113,9 +120,9 @@ npm install
 npm run prelaunch
 ```
 
-The `prelaunch` script intentionally fails if known prototype/security artefacts are reintroduced, including GenSpark `tables/*` calls, Base64 CV storage, placeholder phone numbers, service-account/private-key material, or obvious committed secrets.
+The `prelaunch` script intentionally fails if known prototype/security artefacts are reintroduced, including GenSpark `tables/*` calls, Base64 CV storage, placeholder phone numbers, service-account/private-key material, or obvious committed secrets such as the Gmail OAuth client secret or refresh token.
 
-For Cloudflare-local development, first create a real `wrangler.toml` from `wrangler.toml.example`, create/bind development D1/R2 resources and configure the required secrets, then use:
+For Cloudflare-local development, create a real `wrangler.toml` from `wrangler.toml.example`, create/bind development D1/R2 resources and configure the required secrets, then use:
 
 ```bash
 npm run dev
@@ -123,30 +130,23 @@ npm run dev
 
 ## Deployment
 
-Read **[DEPLOYMENT.md](DEPLOYMENT.md)** before deployment. It contains the required Cloudflare and Firebase provisioning sequence, D1 migration instructions, R2 privacy requirements, Turnstile setup and staff-account seeding process.
+Read **[DEPLOYMENT.md](DEPLOYMENT.md)** before deployment. It contains the Cloudflare/Firebase provisioning sequence, D1 migration instructions, R2 privacy requirements, Turnstile setup, Google Workspace Gmail API setup and staff-account seeding process.
 
-The application intentionally ships with placeholder values in:
-
-- `js/firebase-config.js`
-- `js/turnstile-config.js`
-- `wrangler.toml.example`
-
-Those values must be replaced/configured in the correct environment before staff authentication or public forms can operate.
+Production secrets belong in Cloudflare Pages environment secrets and must never be committed to GitHub.
 
 ## Production readiness
 
-This repository contains the application code, but cloning it does **not** make the system production-ready by itself.
+Before collecting real candidate or employer information, complete the remaining items in **[PRELAUNCH_BLOCKERS.md](PRELAUNCH_BLOCKERS.md)**, including:
 
-Before collecting real candidate or employer information, all items in **[PRELAUNCH_BLOCKERS.md](PRELAUNCH_BLOCKERS.md)** must be resolved, including:
+- preview/production data isolation checks
+- Firebase and staff-access acceptance testing
+- Turnstile action/hostname testing
+- private R2 CV upload/download testing
+- Gmail API notification/confirmation delivery testing
+- deletion/retention acceptance testing
+- full Draft → publish → apply → review → close workflow testing
 
-- production and preview D1 resources provisioned and migrated
-- private R2 buckets provisioned
-- Firebase project configured and approved staff users seeded
-- Turnstile production keys configured
-- privacy-policy legal entity / ABN / address / retention details finalised
-- acceptance tests run against the real deployment
-
-Do not claim production readiness solely because the HTML pages render.
+Do not claim production readiness solely because the HTML pages render. Humans have tried that approach before. It remains unconvincing.
 
 ## Data and security model
 
@@ -170,9 +170,28 @@ The server:
 3. verifies the vacancy is still Open/current;
 4. validates the CV type and size;
 5. stores the CV in private R2;
-6. stores only application/CV metadata in D1.
+6. stores application/CV metadata in D1;
+7. schedules Gmail notification and confirmation messages after persistence succeeds.
 
-CV file bytes are never stored as Base64 in D1.
+CV file bytes are never stored as Base64 in D1 and are never attached to recruitment notification emails.
+
+### Transactional email
+
+`functions/_lib/email.js` uses the Google Workspace Gmail API. The Pages Function exchanges a stored Google OAuth refresh token for a short-lived access token and sends RFC 2822/MIME messages through `users.messages.send`.
+
+The OAuth authorisation should be limited to:
+
+```text
+https://www.googleapis.com/auth/gmail.send
+```
+
+The configured sender and operational mailbox is:
+
+```text
+recruitment@remotebusinesspartner.com.au
+```
+
+Email failures are logged but do not roll back a recruitment form submission that has already been stored successfully.
 
 ### Staff access
 
@@ -220,10 +239,9 @@ This release intentionally does not include:
 - onboarding platform
 - automated sourcing/job-board distribution
 - advanced CRM or analytics
-- email notification automation
 
 Those can be added later if there is a demonstrated operational need.
 
 ## Important repository visibility note
 
-If this repository is public, do not commit real environment secrets, Firebase service-account credentials, private keys, CVs, candidate data or production `.dev.vars`/`.env` files. The included `.gitignore` excludes common local secret/configuration files, but deployment credentials must still be managed through Cloudflare/Firebase rather than source control.
+If this repository is public, do not commit real environment secrets, Firebase service-account credentials, Google OAuth secrets/refresh tokens, private keys, CVs, candidate data or production `.dev.vars`/`.env` files. Deployment credentials must be managed through Cloudflare/Firebase/Google configuration rather than source control.

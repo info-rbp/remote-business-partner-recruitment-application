@@ -1,3 +1,7 @@
+// POST /api/candidate-interest — public JSON endpoint (spec item 36, 44).
+// There is no public GET for this resource — admin-only retrieval lives
+// under /api/admin/candidate-interest.
+
 import { newId, nowIso, run } from '../_lib/database.js';
 import { verifyTurnstile } from '../_lib/turnstile.js';
 import { validateCandidateInterestFields } from '../_lib/validation.js';
@@ -12,7 +16,7 @@ export async function onRequestPost({ request, env }) {
     } = body;
     const turnstileToken = body['cf-turnstile-response'] || body.turnstile_token;
 
-    const turnstileResult = await verifyTurnstile(env, turnstileToken, request.headers.get('cf-connecting-ip'));
+    const turnstileResult = await verifyTurnstile(env, turnstileToken, request.headers.get('cf-connecting-ip'), 'candidate_interest');
     if (!turnstileResult.success) return forbidden('Verification failed. Please try again.');
 
     const err = validateCandidateInterestFields({

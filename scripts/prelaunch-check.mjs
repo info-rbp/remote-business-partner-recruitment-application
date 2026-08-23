@@ -33,6 +33,8 @@ const FORBIDDEN_PATTERNS = [
 
 const SECRET_ASSIGNMENT_PATTERNS = [
   { name: 'TURNSTILE_SECRET_KEY assignment', pattern: /TURNSTILE_SECRET_KEY\s*[:=]\s*['"][^'"]+['"]/g },
+  { name: 'GOOGLE_GMAIL_CLIENT_SECRET assignment', pattern: /GOOGLE_GMAIL_CLIENT_SECRET\s*[:=]\s*['"][^'"]+['"]/g },
+  { name: 'GOOGLE_GMAIL_REFRESH_TOKEN assignment', pattern: /GOOGLE_GMAIL_REFRESH_TOKEN\s*[:=]\s*['"][^'"]+['"]/g },
   { name: 'CLOUDFLARE_EMAIL_API_TOKEN assignment', pattern: /CLOUDFLARE_EMAIL_API_TOKEN\s*[:=]\s*['"][^'"]+['"]/g },
   { name: 'CLOUDFLARE_API_TOKEN assignment', pattern: /CLOUDFLARE_API_TOKEN\s*[:=]\s*['"][^'"]+['"]/g },
   { name: 'GOOGLE_CLIENT_SECRET assignment', pattern: /GOOGLE_CLIENT_SECRET\s*[:=]\s*['"][^'"]+['"]/g },

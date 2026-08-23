@@ -1,3 +1,5 @@
+import { isTurnstileHostnameAllowed } from './turnstile-hostnames.js';
+
 const SITEVERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 
 export async function verifyTurnstile(env, token, remoteip, expectedAction) {
@@ -30,11 +32,7 @@ export async function verifyTurnstile(env, token, remoteip, expectedAction) {
     return { success: false, reason: 'action_mismatch' };
   }
 
-  const allowedHostnames = String(env.TURNSTILE_ALLOWED_HOSTNAMES || '')
-    .split(',')
-    .map(v => v.trim())
-    .filter(Boolean);
-  if (allowedHostnames.length && !allowedHostnames.includes(json.hostname)) {
+  if (!isTurnstileHostnameAllowed(env, json.hostname)) {
     console.error(`Turnstile hostname rejected: ${json.hostname || '(none)'}.`);
     return { success: false, reason: 'hostname_mismatch' };
   }

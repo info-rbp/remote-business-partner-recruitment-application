@@ -1,3 +1,7 @@
+// POST /api/recruitment-requests — public JSON endpoint (employer "Start
+// Recruitment" form; spec item 35, 43). No public GET — admin-only
+// retrieval lives under /api/admin/recruitment-requests.
+
 import { newId, nowIso, run } from '../_lib/database.js';
 import { verifyTurnstile } from '../_lib/turnstile.js';
 import { validateRecruitmentRequestFields } from '../_lib/validation.js';
@@ -13,7 +17,7 @@ export async function onRequestPost({ request, env }) {
     } = body;
     const turnstileToken = body['cf-turnstile-response'] || body.turnstile_token;
 
-    const turnstileResult = await verifyTurnstile(env, turnstileToken, request.headers.get('cf-connecting-ip'));
+    const turnstileResult = await verifyTurnstile(env, turnstileToken, request.headers.get('cf-connecting-ip'), 'recruitment_request');
     if (!turnstileResult.success) return forbidden('Verification failed. Please try again.');
 
     const err = validateRecruitmentRequestFields({

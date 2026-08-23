@@ -1,12 +1,12 @@
 # DEPLOYMENT — Remote Business Partner
 
 The application is designed for **Cloudflare Pages + Pages Functions + D1 +
-private R2 + Firebase Authentication + Cloudflare Turnstile + Cloudflare Email Service**.
+private R2 + Firebase Authentication + Cloudflare Turnstile + Google Workspace Gmail API**.
 
 The public site can deploy before every backend service is configured. Public
 forms fail closed until Turnstile is configured, staff sign-in fails until
 Firebase is configured, and transactional email delivery is skipped safely when
-Email Service credentials are absent so a successful form submission is never
+Gmail OAuth credentials are absent so a successful form submission is never
 lost because an email could not be sent.
 
 ## 1. Cloudflare Pages
@@ -97,7 +97,6 @@ BUSINESS_TIMEZONE=Australia/Perth
 FIREBASE_PROJECT_ID=business-plan-applicatio-17047
 TURNSTILE_SITE_KEY=<public-turnstile-site-key>
 TURNSTILE_ALLOWED_HOSTNAMES=remote-business-partner-recruitment-application.pages.dev
-CLOUDFLARE_ACCOUNT_ID=<your-cloudflare-account-id>
 RECRUITMENT_EMAIL_FROM=recruitment@remotebusinesspartner.com.au
 RECRUITMENT_NOTIFICATION_EMAIL=recruitment@remotebusinesspartner.com.au
 PUBLIC_SITE_URL=https://remote-business-partner-recruitment-application.pages.dev
@@ -123,11 +122,18 @@ Store these only as Pages secrets, never in GitHub:
 
 ```text
 TURNSTILE_SECRET_KEY
-CLOUDFLARE_EMAIL_API_TOKEN
+GOOGLE_GMAIL_CLIENT_ID
+GOOGLE_GMAIL_CLIENT_SECRET
+GOOGLE_GMAIL_REFRESH_TOKEN
 ```
 
-The email token should be narrowly scoped to **Email Sending: Edit** for the
-relevant Cloudflare account.
+The Google refresh token should be issued to the Workspace account that is
+permitted to send as `recruitment@remotebusinesspartner.com.au`, and the OAuth
+consent should use the narrow Gmail scope:
+
+```text
+https://www.googleapis.com/auth/gmail.send
+```
 
 ## 6. Cloudflare Turnstile
 
@@ -166,10 +172,12 @@ require Firebase Hosting, Firestore or Firebase Storage.
 A valid Firebase user is not enough by itself. The backend also requires an
 active matching `staff_users` record.
 
-## 8. Cloudflare Email Service
+## 8. Google Workspace Gmail API
 
-Transactional email is sent through the Cloudflare Email Service REST API from
-Pages Functions. The integration sends:
+Transactional email is sent from Pages Functions through the Gmail API using
+the Google Workspace mailbox authorised by `GOOGLE_GMAIL_REFRESH_TOKEN`.
+
+The integration sends:
 
 - new application notification to `recruitment@remotebusinesspartner.com.au`
 - candidate application receipt confirmation
@@ -179,24 +187,28 @@ Pages Functions. The integration sends:
 Candidate CVs are **never attached** to notification emails. Staff must retrieve
 CVs through the authenticated Admin area.
 
-Cloudflare setup:
+Required Google setup:
 
-1. In Cloudflare, go to **Compute > Email Service > Email Sending**.
-2. Onboard `remotebusinesspartner.com.au` for Email Sending and allow Cloudflare
-   to add/verify the required SPF/DKIM/bounce records.
-3. Confirm the sender `recruitment@remotebusinesspartner.com.au` is permitted.
-4. Create a Cloudflare API token with **Email Sending: Edit** permission scoped
-   to the relevant account.
-5. Add the account ID as `CLOUDFLARE_ACCOUNT_ID`.
-6. Add the token as the Pages secret `CLOUDFLARE_EMAIL_API_TOKEN`.
+1. Enable the Gmail API in the Google Cloud project used for recruitment.
+2. Configure the OAuth consent screen for the Workspace organisation.
+3. Create an OAuth client.
+4. Authorise `recruitment@remotebusinesspartner.com.au` with only
+   `https://www.googleapis.com/auth/gmail.send`.
+5. Obtain the refresh token from that authorisation flow.
+6. Store the client ID, client secret and refresh token as the three Cloudflare
+   Pages secrets listed above.
 7. Redeploy the Pages project.
 8. Submit a controlled test form and confirm both the RBP notification and the
    submitter confirmation are delivered.
 
-Cloudflare Email Sending for arbitrary external recipients requires the account
-to be entitled to Email Sending. If Email Service is not enabled or the token is
-missing, the application logs the email failure but still preserves the
-successfully submitted recruitment record.
+At runtime `functions/_lib/email.js` exchanges the stored refresh token for a
+short-lived Google access token at `https://oauth2.googleapis.com/token`, then
+sends an RFC 2822/MIME message through `users.messages.send`. Access tokens are
+cached in the Worker isolate until shortly before expiry. A Gmail 401 causes one
+forced token refresh and one retry.
+
+If Gmail OAuth is unavailable or a mail send fails, the error is logged but the
+already-successful recruitment submission remains stored in D1/R2.
 
 ## 9. Retention and deletion controls
 
@@ -241,7 +253,7 @@ Then complete the acceptance checklist in `PRELAUNCH_BLOCKERS.md`, including:
 - staff authentication
 - Turnstile action/hostname enforcement
 - CV upload/storage/download
-- transactional email delivery
+- Gmail transactional email delivery
 - soft-delete and 30-day purge behaviour
 - privacy acknowledgement storage
 - the full vacancy-to-application workflow
@@ -255,7 +267,7 @@ Use GitHub as the source of truth for application code. Do not commit:
 
 - Firebase service-account keys
 - Turnstile secret keys
-- Cloudflare API tokens
+- Google OAuth client secrets or refresh tokens
 - candidate CVs
 - real candidate or employer records
 - `.env` or local secret files

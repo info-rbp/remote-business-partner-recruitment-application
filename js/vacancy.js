@@ -75,7 +75,6 @@ async function loadVacancy() {
 
     document.getElementById('loadingState').classList.add('hidden');
     document.getElementById('vacancyContent').classList.remove('hidden');
-    if (window.RbpApi) RbpApi.renderTurnstile('applyTurnstile');
   } catch (err) {
     console.error(err);
     showNotFound();
@@ -93,18 +92,66 @@ const closeModalBtn = document.getElementById('closeModalBtn');
 const closeSuccessBtn = document.getElementById('closeSuccessBtn');
 const applicationForm = document.getElementById('applicationForm');
 const applySuccess = document.getElementById('applySuccess');
+const submitBtn = document.getElementById('submitAppBtn');
 
 let lastFocusedEl = null;
+let applicationTurnstileRendered = false;
+
+function setVerificationPending(label = 'Verifying...') {
+  submitBtn.disabled = true;
+  submitBtn.classList.add('opacity-60', 'cursor-not-allowed');
+  submitBtn.innerHTML = `<i class="fa-solid fa-shield-halved"></i> ${label}`;
+}
+
+function setVerificationReady() {
+  submitBtn.disabled = false;
+  submitBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+  submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Submit Application';
+}
+
+async function prepareApplicationVerification() {
+  setVerificationPending();
+  try {
+    if (applicationTurnstileRendered) {
+      RbpApi.resetTurnstile('applyTurnstile');
+      return;
+    }
+
+    await RbpApi.renderTurnstile('applyTurnstile', 'job_application', {
+      onSuccess: token => {
+        if (token) setVerificationReady();
+      },
+      onExpired: () => setVerificationPending('Verification expired'),
+      onTimeout: () => setVerificationPending('Retry verification'),
+      onError: code => {
+        setVerificationPending('Retry verification');
+        console.error('Application verification error:', code);
+      }
+    });
+    applicationTurnstileRendered = true;
+
+    if (RbpApi.getTurnstileToken('applyTurnstile')) setVerificationReady();
+  } catch (err) {
+    console.error('Application verification could not be prepared:', err);
+    setVerificationPending('Verification unavailable');
+    RBP.toast('Verification could not be loaded. Please refresh the page and try again.', 'error');
+  }
+}
 
 function openModal() {
   lastFocusedEl = document.activeElement;
   document.getElementById('appVacancyId').value = currentVacancy.id;
   applicationForm.classList.remove('hidden');
   applySuccess.classList.add('hidden');
+  setVerificationPending();
   applyModal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
   const firstField = document.getElementById('fullName');
   if (firstField) firstField.focus();
+
+  // Turnstile must render only after the modal is visible so the managed
+  // challenge can complete and issue a token reliably.
+  requestAnimationFrame(() => prepareApplicationVerification());
 }
 function closeModal() {
   applyModal.classList.add('hidden');
@@ -158,12 +205,14 @@ applicationForm.addEventListener('submit', async (e) => {
   }
   const turnstileToken = RbpApi.getTurnstileToken('applyTurnstile');
   if (!turnstileToken) {
-    RBP.toast('Please complete the verification challenge before submitting.', 'error');
+    setVerificationPending('Complete verification');
+    RbpApi.resetTurnstile('applyTurnstile');
+    RBP.toast('Verification is still required. Complete the verification shown above, then submit again.', 'error');
     return;
   }
 
-  const submitBtn = document.getElementById('submitAppBtn');
   submitBtn.disabled = true;
+  submitBtn.classList.add('opacity-60', 'cursor-not-allowed');
   submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
 
   try {
@@ -187,9 +236,11 @@ applicationForm.addEventListener('submit', async (e) => {
     console.error(err);
     RBP.toast(err.message || "We couldn't submit your application. Please check your connection and try again.", 'error');
     RbpApi.resetTurnstile('applyTurnstile');
+    setVerificationPending();
   } finally {
-    submitBtn.disabled = false;
-    submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Submit Application';
+    if (!applicationForm.classList.contains('hidden') && RbpApi.getTurnstileToken('applyTurnstile')) {
+      setVerificationReady();
+    }
   }
 });
 

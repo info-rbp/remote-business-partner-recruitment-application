@@ -1,62 +1,51 @@
 # ============================================================================
-# Copy this file to `wrangler.toml` in a real Cloudflare account (outside
-# this GenSpark editor) and fill in the placeholder values before running
-# `wrangler pages dev` / `wrangler pages deploy`. See DEPLOYMENT.md for the
-# full setup procedure.
+# Cloudflare Pages reference configuration for the Remote Business Partner
+# Recruitment Application.
 #
-# Do NOT put secrets (TURNSTILE_SECRET_KEY, GOOGLE_CLIENT_SECRET, etc.) in
-# this file — set them with `wrangler pages secret put <NAME>` (production)
-# and via the Cloudflare Pages dashboard "Preview" environment variables
-# (preview), never committed to source control.
+# This file is intentionally an example rather than the live deployment
+# configuration. The production Pages project may continue to use bindings and
+# variables configured in the Cloudflare dashboard. Do not commit secrets.
 # ============================================================================
 
 name = "rbp-recruitment"
-compatibility_date = "2024-09-23"
+compatibility_date = "2026-08-23"
 pages_build_output_dir = "."
 
 # ----------------------------------------------------------------------------
-# Production environment (default) — bound when deployed from the main branch
+# Production D1 database
 # ----------------------------------------------------------------------------
-
-# Cloudflare D1 database binding used by functions/_lib/database.js as `env.DB`.
-# Create with: wrangler d1 create rbp-recruitment
+# Cloudflare D1 binding used by Pages Functions as `env.DB`.
 [[d1_databases]]
 binding = "DB"
 database_name = "rbp-recruitment"
-database_id = "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID"
+database_id = "9e9d4e61-eb82-456e-a031-d82c58aa5b39"
 
-# Cloudflare R2 bucket binding used by functions/_lib/files.js as `env.CV_BUCKET`.
-# Create with: wrangler r2 bucket create rbp-recruitment-cvs
-# Must remain PRIVATE — no public development URL, no public custom domain,
-# no permanent public URLs generated anywhere in this codebase.
+# ----------------------------------------------------------------------------
+# Production R2 bucket
+# ----------------------------------------------------------------------------
+# Create this bucket separately and keep it private. Candidate CV files are
+# accessed only through authenticated Pages Functions as `env.CV_BUCKET`.
 [[r2_buckets]]
 binding = "CV_BUCKET"
 bucket_name = "rbp-recruitment-cvs"
 
-# Plain (non-secret) environment variables.
-# Firebase web config values (apiKey, authDomain, appId) are NOT secrets and
-# are set directly in login.html / admin.html, not here.
-# TURNSTILE_SITE_KEY (public) is also set directly in the public HTML forms.
+# ----------------------------------------------------------------------------
+# Public/non-secret runtime variables
+# ----------------------------------------------------------------------------
 [vars]
 FIREBASE_PROJECT_ID = "REPLACE_WITH_FIREBASE_PROJECT_ID"
 BUSINESS_TIMEZONE = "Australia/Perth"
+TURNSTILE_SITE_KEY = "REPLACE_WITH_TURNSTILE_SITE_KEY"
+TURNSTILE_ALLOWED_HOSTNAMES = "remote-business-partner-recruitment-application.pages.dev"
 
-# Secrets — DO NOT set values here. Set them out-of-band with:
-#   wrangler pages secret put TURNSTILE_SECRET_KEY
-#
-# Required secret (referenced by functions/_lib/turnstile.js):
-#   TURNSTILE_SECRET_KEY   Cloudflare Turnstile secret key (server-side verify)
-#
-# No Gmail/email secrets are required in this build — email notifications
-# were out of scope for this specification revision (see README.md /
-# PRELAUNCH_BLOCKERS.md for confirmation of current scope).
+# Secrets are never committed. Configure TURNSTILE_SECRET_KEY as an encrypted
+# Cloudflare Pages secret in the dashboard.
 
 # ----------------------------------------------------------------------------
-# Preview environment — bound for non-production branches / PR previews.
-# Uses a SEPARATE D1 database so preview deploys never read or write real
-# candidate/employer data (spec item 3/59).
-# Create with: wrangler d1 create rbp-recruitment-preview
+# Preview environment
 # ----------------------------------------------------------------------------
+# Use separate D1/R2 resources for preview deployments so test traffic never
+# touches production candidate or employer data.
 [env.preview]
 
 [[env.preview.d1_databases]]
@@ -71,5 +60,5 @@ bucket_name = "rbp-recruitment-cvs-preview"
 [env.preview.vars]
 FIREBASE_PROJECT_ID = "REPLACE_WITH_FIREBASE_PROJECT_ID"
 BUSINESS_TIMEZONE = "Australia/Perth"
-# Preview secrets are set the same way, scoped to the preview environment:
-#   wrangler pages secret put TURNSTILE_SECRET_KEY --env preview
+TURNSTILE_SITE_KEY = "REPLACE_WITH_PREVIEW_TURNSTILE_SITE_KEY"
+TURNSTILE_ALLOWED_HOSTNAMES = ""

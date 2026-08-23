@@ -2,28 +2,21 @@
    Firebase Web SDK configuration — STAFF AUTHENTICATION ONLY.
 
    These values come from the Firebase Console (Project settings > General >
-   Your apps > Web app). They are NOT secret — the Firebase Web API key is
-   safe to ship in client-side code; access is enforced by Firebase Auth
-   rules and, on this project, by the staff_users table check performed
-   server-side in functions/_lib/auth.js. Do not put any server secret
-   (service-account private key, etc.) in this file or anywhere in the
-   frontend.
+   Your apps > Web app). They are public client configuration values, not
+   server secrets. Access is enforced by Firebase Authentication and by the
+   staff_users authorisation check in functions/_lib/auth.js.
 
-   DEPLOYMENT BLOCKER: the values below are placeholders. Replace every
-   "REPLACE_ME" with the real values from your Firebase project before
-   going live — see DEPLOYMENT.md ("Firebase setup") and
-   PRELAUNCH_BLOCKERS.md. Until replaced, sign-in on login.html will fail
-   with a Firebase configuration error, which is the correct, honest
-   behaviour rather than pretending to work.
+   Do not put any Firebase service-account private key or other server secret
+   in this file or anywhere in the frontend.
    =========================================================== */
 
 const FIREBASE_CONFIG = {
-  apiKey: 'REPLACE_ME',
-  authDomain: 'REPLACE_ME.firebaseapp.com',
-  projectId: 'REPLACE_ME',
-  storageBucket: 'REPLACE_ME.appspot.com',
-  messagingSenderId: 'REPLACE_ME',
-  appId: 'REPLACE_ME'
+  apiKey: 'AIzaSyBYFNFUy4Sa4dQUJNUEJ3yeLHBwhxf2UJ8',
+  authDomain: 'business-plan-applicatio-17047.firebaseapp.com',
+  projectId: 'business-plan-applicatio-17047',
+  storageBucket: 'business-plan-applicatio-17047.firebasestorage.app',
+  messagingSenderId: '696236368989',
+  appId: '1:696236368989:web:6334ef173b11e7456919b4'
 };
 
 // The FIREBASE_PROJECT_ID Cloudflare Pages environment variable (used by

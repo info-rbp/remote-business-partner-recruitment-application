@@ -38,9 +38,9 @@ current deployment work. They should still be included in acceptance testing:
 - [ ] Confirm preview/testing deployments cannot access genuine production D1/R2 data
 - [ ] Confirm `BUSINESS_TIMEZONE=Australia/Perth`
 
-## 3. Cloudflare Email Service
+## 3. Google Workspace Gmail API
 
-Application code now sends, when Cloudflare Email Service is configured:
+Application code now sends, when Gmail OAuth is configured:
 
 - RBP notification + candidate confirmation for job applications
 - RBP notification + candidate confirmation for candidate-interest registrations
@@ -48,17 +48,20 @@ Application code now sends, when Cloudflare Email Service is configured:
 
 No CV is attached to email.
 
-Remaining Cloudflare account setup/verification:
+Google/Cloudflare configuration:
 
-- [ ] Onboard `remotebusinesspartner.com.au` under Email Service > Email Sending
-- [ ] Verify the sending-domain DNS records
-- [ ] Create an API token scoped to **Email Sending: Edit**
-- [ ] Set `CLOUDFLARE_ACCOUNT_ID`
-- [ ] Set `CLOUDFLARE_EMAIL_API_TOKEN` as a Pages secret
-- [ ] Redeploy after adding the email configuration
-- [ ] Confirm email delivery to `recruitment@remotebusinesspartner.com.au`
+- [x] Google Workspace recruitment mailbox selected
+- [x] `GOOGLE_GMAIL_CLIENT_ID` added to Cloudflare
+- [x] `GOOGLE_GMAIL_CLIENT_SECRET` added to Cloudflare
+- [x] `GOOGLE_GMAIL_REFRESH_TOKEN` added to Cloudflare
+- [ ] Confirm Gmail API is enabled for the Google Cloud project
+- [ ] Confirm the refresh token was authorised as `recruitment@remotebusinesspartner.com.au`
+- [ ] Confirm OAuth permission is limited to `https://www.googleapis.com/auth/gmail.send`
+- [ ] Redeploy after the Gmail transport code reaches `main`
+- [ ] Confirm notification delivery to `recruitment@remotebusinesspartner.com.au`
 - [ ] Confirm candidate confirmation delivery to an external test address
 - [ ] Confirm employer confirmation delivery to an external test address
+- [ ] Confirm messages appear in the recruitment mailbox Sent folder
 
 Email failures do not roll back or reject a form submission after its D1/R2
 write has succeeded.
@@ -110,5 +113,5 @@ Acceptance checks:
 ## 7. Ongoing maintenance
 
 New blockers discovered during production use should be recorded here rather
-than silently worked around. Keep Cloudflare, Firebase, Email Service and
-application dependencies under review as the platform evolves.
+than silently worked around. Keep Cloudflare, Firebase, Google Workspace/Gmail
+API and application dependencies under review as the platform evolves.

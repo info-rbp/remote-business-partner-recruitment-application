@@ -53,7 +53,8 @@ export async function sendRecruitmentEmail(env, { to, subject, text, html, reply
     text,
     html
   };
-  if (replyTo) payload.replyTo = replyTo;
+  // Cloudflare Email Service REST API uses reply_to. The Workers binding uses replyTo.
+  if (replyTo) payload.reply_to = replyTo;
 
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfg.accountId)}/email/sending/send`,

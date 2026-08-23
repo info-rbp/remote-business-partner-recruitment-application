@@ -39,7 +39,7 @@ TURNSTILE_SITE_KEY = "REPLACE_WITH_TURNSTILE_SITE_KEY"
 TURNSTILE_ALLOWED_HOSTNAMES = "remote-business-partner-recruitment-application.pages.dev,recruitment.remotebusinesspartner.com.au"
 RECRUITMENT_EMAIL_FROM = "recruitment@remotebusinesspartner.com.au"
 RECRUITMENT_NOTIFICATION_EMAIL = "recruitment@remotebusinesspartner.com.au"
-PUBLIC_SITE_URL = "https://remote-business-partner-recruitment-application.pages.dev"
+PUBLIC_SITE_URL = "https://recruitment.remotebusinesspartner.com.au"
 
 # Secrets are never committed. Configure all of these as encrypted Cloudflare
 # Pages secrets in the dashboard:

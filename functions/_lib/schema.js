@@ -1,9 +1,8 @@
-// Idempotent runtime bootstrap for the initial D1 schema.
+// Idempotent runtime bootstrap for the D1 schema.
 //
-// The normal source of truth remains migrations/0001_initial.sql. This helper
-// exists so a newly-bound D1 database can initialise itself on the first API
-// request even when Wrangler is not available in the deployment environment.
-// It records version 1 in rbp_schema_migrations and then becomes a no-op.
+// SQL migrations remain documented under /migrations, while this helper makes
+// production resilient when a newly-bound D1 database has not been migrated by
+// Wrangler. Each schema version is recorded in rbp_schema_migrations.
 
 let schemaReadyPromise = null;
 
@@ -114,36 +113,53 @@ const SCHEMA_V1 = [
   `CREATE INDEX IF NOT EXISTS idx_staff_firebase_uid ON staff_users(firebase_uid)`
 ];
 
+const SCHEMA_V2 = [
+  `CREATE TABLE IF NOT EXISTS deleted_records (
+    resource_type TEXT NOT NULL CHECK (resource_type IN ('candidate_interest','recruitment_request')),
+    resource_id TEXT NOT NULL,
+    deleted_at TEXT NOT NULL,
+    deleted_by TEXT,
+    PRIMARY KEY (resource_type, resource_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_deleted_records_deleted_at ON deleted_records(deleted_at)`
+];
+
+async function isVersionApplied(env, version) {
+  return env.DB
+    .prepare('SELECT version FROM rbp_schema_migrations WHERE version = ?')
+    .bind(version)
+    .first();
+}
+
+async function applyVersion(env, version, statements) {
+  const applied = await isVersionApplied(env, version);
+  if (applied) return;
+
+  const prepared = statements.map(sql => env.DB.prepare(sql));
+  prepared.push(
+    env.DB
+      .prepare('INSERT OR IGNORE INTO rbp_schema_migrations (version, applied_at) VALUES (?, ?)')
+      .bind(version, new Date().toISOString())
+  );
+
+  // D1 batch is transactional. A partially-created schema version is rolled
+  // back and can safely retry on a later request.
+  await env.DB.batch(prepared);
+}
+
 async function initialiseSchema(env) {
   if (!env || !env.DB) {
     throw new Error('Cloudflare D1 binding "DB" is not configured for this deployment.');
   }
 
   await env.DB.prepare(CREATE_MIGRATIONS_TABLE).run();
-
-  const applied = await env.DB
-    .prepare('SELECT version FROM rbp_schema_migrations WHERE version = ?')
-    .bind(1)
-    .first();
-
-  if (applied) return;
-
-  const statements = SCHEMA_V1.map((sql) => env.DB.prepare(sql));
-  statements.push(
-    env.DB
-      .prepare('INSERT OR IGNORE INTO rbp_schema_migrations (version, applied_at) VALUES (?, ?)')
-      .bind(1, new Date().toISOString())
-  );
-
-  // D1 batch executes the prepared statements transactionally. If any schema
-  // statement fails, the batch is rolled back and a later request can retry.
-  await env.DB.batch(statements);
+  await applyVersion(env, 1, SCHEMA_V1);
+  await applyVersion(env, 2, SCHEMA_V2);
 }
 
 export function ensureSchema(env) {
   if (!schemaReadyPromise) {
     schemaReadyPromise = initialiseSchema(env).catch((error) => {
-      // Allow a later request to retry after a transient D1/binding failure.
       schemaReadyPromise = null;
       throw error;
     });

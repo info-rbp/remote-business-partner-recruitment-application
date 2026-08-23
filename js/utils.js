@@ -9,6 +9,19 @@
    =========================================================== */
 
 const RBP = (() => {
+  const productionOrigin = 'https://recruitment.remotebusinesspartner.com.au';
+
+  // Keep public canonical URLs anchored to the custom production domain while
+  // allowing the pages.dev hostname to remain available as a platform fallback.
+  const canonical = document.querySelector('link[rel="canonical"]');
+  if (canonical) {
+    const configuredPath = canonical.getAttribute('href') || window.location.pathname || '/';
+    try {
+      canonical.href = new URL(configuredPath, `${productionOrigin}/`).href;
+    } catch {
+      canonical.href = `${productionOrigin}${window.location.pathname || '/'}`;
+    }
+  }
 
   // ---------- Toast ----------
   function toast(message, type = 'info') {
@@ -28,7 +41,7 @@ const RBP = (() => {
     if (!value) return '—';
     const d = new Date(value);
     if (isNaN(d.getTime())) return '—';
-    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    return d.toLocaleDateString('en-AU', { year: 'numeric', month: 'short', day: 'numeric' });
   }
 
   function timeAgo(value) {
@@ -76,6 +89,6 @@ const RBP = (() => {
   }
 
   return {
-    toast, formatDate, timeAgo, escapeHtml, nl2br, badgeClass, qs
+    productionOrigin, toast, formatDate, timeAgo, escapeHtml, nl2br, badgeClass, qs
   };
 })();

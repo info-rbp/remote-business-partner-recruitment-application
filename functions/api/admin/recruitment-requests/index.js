@@ -1,14 +1,17 @@
 import { paginate } from '../../../_lib/database.js';
+import { activeRecordWhere, purgeExpiredSoftDeletes } from '../../../_lib/retention.js';
 import { ok, safeHandler } from '../../../_lib/responses.js';
 
 export async function onRequestGet({ request, env }) {
   return safeHandler(async () => {
+    await purgeExpiredSoftDeletes(env);
+
     const url = new URL(request.url);
     const status = url.searchParams.get('status') || '';
     const page = url.searchParams.get('page') || 1;
     const limit = url.searchParams.get('limit') || 25;
 
-    const whereParts = ['1=1'];
+    const whereParts = [activeRecordWhere('recruitment_request', 'recruitment_requests')];
     const whereParams = [];
     if (status) { whereParts.push('status = ?'); whereParams.push(status); }
 

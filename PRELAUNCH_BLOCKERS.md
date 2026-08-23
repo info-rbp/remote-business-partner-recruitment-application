@@ -1,69 +1,104 @@
 # Pre-Launch Blockers — Remote Business Partner
 
 This document records the remaining production checks for the Remote Business
-Partner recruitment application. The public site is deployed on Cloudflare
-Pages, but real candidate/employer data should only be collected after the
-items below are verified.
+Partner recruitment application.
 
 ## 1. Privacy and business details
 
-`privacy.html` now contains a recruitment-specific privacy policy covering:
+The published recruitment identity is now:
 
-- candidate applications and CVs
-- candidate registrations / expressions of interest
-- employer recruitment requests
-- prospective-employer disclosure
-- cloud service providers
-- information security
-- access, correction and deletion requests
-- a general 24-month candidate retention practice
-- human-led recruitment and no automated recruitment decisions
+```text
+Remote Business Partner
+ABN 76 098 718 150
+recruitment@remotebusinesspartner.com.au
+```
 
-Before the final branded production launch, confirm that **Remote Business
-Partner** is the correct public identity for the service. Add any legal entity
-name, ABN, business address or telephone number that RBP chooses or is required
-to publish. Review the policy whenever recruitment practices, service
-providers, retention practices or applicable privacy requirements materially
-change.
+`privacy.html` contains a recruitment-specific privacy policy covering candidate
+applications/CVs, candidate registrations, employer recruitment requests,
+prospective-employer disclosure, cloud services, security, access/correction,
+retention/deletion and human-led recruitment.
 
-## 2. Cloudflare infrastructure to verify
+- [x] RBP public identity confirmed
+- [x] ABN published
+- [x] Recruitment/privacy contact email confirmed
+- [ ] Review the policy if recruitment practices, service providers or retention
+      requirements materially change
 
-- [ ] Production D1 database exists and `migrations/0001_initial.sql` has been applied
-- [ ] Preview/testing uses a separate D1 database where practical
-- [ ] Private R2 bucket (`rbp-recruitment-cvs`) exists
-- [ ] R2 public access, public development URL and public custom domain are disabled
-- [ ] Pages binding `DB` points to the production D1 database
-- [ ] Pages binding `CV_BUCKET` points to the private CV bucket
-- [ ] `BUSINESS_TIMEZONE=Australia/Perth`
-- [ ] `TURNSTILE_SITE_KEY` is configured as a normal Pages environment variable
-- [ ] `TURNSTILE_SECRET_KEY` is configured as a Pages secret
-- [ ] `TURNSTILE_ALLOWED_HOSTNAMES` contains the approved production hostname(s)
-- [ ] Turnstile widget uses Managed mode and is registered for the production hostname
+## 2. Cloudflare infrastructure
 
-## 3. Firebase staff authentication
+The following production components have been implemented/configured during the
+current deployment work. They should still be included in acceptance testing:
 
-- [ ] Create/configure the Firebase project
-- [ ] Enable Email/Password sign-in
-- [ ] Replace the `REPLACE_ME` values in `js/firebase-config.js`
-- [ ] Set `FIREBASE_PROJECT_ID` in Cloudflare to the same Firebase project ID
-- [ ] Add the Cloudflare production/custom domain to Firebase Authorized domains
-- [ ] Manually create approved staff users
-- [ ] Insert each approved Firebase UID into `staff_users`
-- [ ] Test approved and unapproved account behaviour
-- [ ] Test password reset and sign-out
+- [x] Production D1 database configured and bound as `DB`
+- [x] Runtime D1 schema bootstrap configured
+- [x] Private R2 bucket configured and bound as `CV_BUCKET`
+- [x] Firebase staff authentication configured
+- [x] Approved admin user inserted in `staff_users`
+- [x] Turnstile code/configuration implemented
+- [ ] Confirm preview/testing deployments cannot access genuine production D1/R2 data
+- [ ] Confirm `BUSINESS_TIMEZONE=Australia/Perth`
 
-## 4. Acceptance tests
+## 3. Cloudflare Email Service
+
+Application code now sends, when Cloudflare Email Service is configured:
+
+- RBP notification + candidate confirmation for job applications
+- RBP notification + candidate confirmation for candidate-interest registrations
+- RBP notification + employer confirmation for recruitment requests
+
+No CV is attached to email.
+
+Remaining Cloudflare account setup/verification:
+
+- [ ] Onboard `remotebusinesspartner.com.au` under Email Service > Email Sending
+- [ ] Verify the sending-domain DNS records
+- [ ] Create an API token scoped to **Email Sending: Edit**
+- [ ] Set `CLOUDFLARE_ACCOUNT_ID`
+- [ ] Set `CLOUDFLARE_EMAIL_API_TOKEN` as a Pages secret
+- [ ] Redeploy after adding the email configuration
+- [ ] Confirm email delivery to `recruitment@remotebusinesspartner.com.au`
+- [ ] Confirm candidate confirmation delivery to an external test address
+- [ ] Confirm employer confirmation delivery to an external test address
+
+Email failures do not roll back or reject a form submission after its D1/R2
+write has succeeded.
+
+## 4. Retention and deletion controls
+
+Employer recruitment requests and candidate-interest registrations now support
+soft deletion from Admin:
+
+- deleted records disappear from normal Admin lists immediately
+- a marker is stored in `deleted_records`
+- records remain for a 30-day operational grace period
+- expired soft-deleted records are permanently purged during later authorised
+  Admin list requests
+
+Acceptance checks:
+
+- [ ] Delete a test employer recruitment request and confirm it disappears
+- [ ] Delete a test candidate-interest record and confirm it disappears
+- [ ] Confirm `deleted_records` contains the correct deletion marker and staff email
+- [ ] Confirm a soft-deleted record cannot be fetched from its normal Admin endpoint
+- [ ] Verify the 30-day purge path in a non-production/test record scenario
+
+## 5. Authentication acceptance tests
 
 - [ ] No-token admin API request returns 401
 - [ ] Invalid Firebase token returns 401
-- [ ] Valid Firebase account not listed in `staff_users` returns 403
-- [ ] Approved staff user can load Admin
+- [x] Valid Firebase account not listed in `staff_users` returns 403
+- [x] Approved staff user can load Admin
+- [ ] Password reset works
+- [ ] Sign-out works and protected APIs remain unavailable afterward
+
+## 6. Recruitment workflow acceptance tests
+
 - [ ] Public vacancy API returns only Open and unexpired vacancies
 - [ ] Draft, Closed and expired vacancies are not publicly accessible
 - [ ] Public vacancy response does not expose `employer_name` or staff-only fields
-- [ ] Job application requires a valid Turnstile `job_application` token
-- [ ] Candidate registration requires a valid Turnstile `candidate_interest` token
-- [ ] Employer request requires a valid Turnstile `recruitment_request` token
+- [ ] Job application requires valid Turnstile `job_application` token
+- [ ] Candidate registration requires valid Turnstile `candidate_interest` token
+- [ ] Employer request requires valid Turnstile `recruitment_request` token
 - [ ] Wrong Turnstile action is rejected
 - [ ] Wrong Turnstile hostname is rejected when hostname allowlisting is configured
 - [ ] CV upload rejects unsupported files and files larger than 5 MB
@@ -72,15 +107,8 @@ change.
 - [ ] Privacy acknowledgement is stored for all public submissions
 - [ ] Full workflow passes: create Draft → publish → apply → review → close
 
-## 5. Email notifications
-
-This build still does **not** send email notifications when a new application,
-candidate registration or employer recruitment request is submitted. This is
-not required for the website to function, but it is recommended before active
-recruitment so staff do not need to continuously check the dashboard.
-
-## 6. Ongoing maintenance
+## 7. Ongoing maintenance
 
 New blockers discovered during production use should be recorded here rather
-than silently worked around. Keep Cloudflare, Firebase and dependency settings
-under review as the application evolves.
+than silently worked around. Keep Cloudflare, Firebase, Email Service and
+application dependencies under review as the platform evolves.

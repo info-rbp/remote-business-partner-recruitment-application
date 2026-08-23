@@ -12,20 +12,21 @@
 //   -> retrieve vacancy from D1 -> confirm exists -> confirm status=Open
 //   -> confirm deadline not passed -> validate CV -> generate application id
 //   -> upload CV to private R2 -> insert application metadata into D1
-//   -> return success
+//   -> schedule non-blocking transactional emails -> return success
 //
-// R2/D1 failure safety (spec item 20): upload CV to R2 first, then insert
-// into D1. If the D1 insert fails, delete the just-uploaded R2 object so no
-// orphaned CV is left behind. If the R2 upload itself fails, no D1 row is
-// ever created.
+// R2/D1 failure safety: upload CV to R2 first, then insert into D1. If the
+// D1 insert fails, delete the just-uploaded R2 object so no orphaned CV is
+// left behind. Email failure never rolls back a successfully stored application.
 
 import { newId, nowIso, first, run, getCurrentBusinessDate } from '../_lib/database.js';
 import { verifyTurnstile } from '../_lib/turnstile.js';
 import { validateResumeFile, buildResumeKey, storeResume, deleteResume } from '../_lib/files.js';
 import { validateApplicationFields } from '../_lib/validation.js';
+import { notifyNewApplication, deferEmail } from '../_lib/email.js';
 import { validationError, forbidden, notFound, conflict, tooLarge, unsupportedMediaType, safeHandler, created } from '../_lib/responses.js';
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost(context) {
+  const { request, env } = context;
   return safeHandler(async () => {
     const contentType = request.headers.get('content-type') || '';
     if (!contentType.includes('multipart/form-data')) {
@@ -43,12 +44,9 @@ export async function onRequestPost({ request, env }) {
     const turnstileToken = form.get('cf-turnstile-response') || form.get('turnstile_token');
     const resumeFile = form.get('resume');
 
-    // ---- 1. Turnstile verification first (spec: do not save any data, do
-    // not upload CV to R2, if Turnstile fails) ----
     const turnstileResult = await verifyTurnstile(env, turnstileToken, request.headers.get('cf-connecting-ip'), 'job_application');
     if (!turnstileResult.success) return forbidden('Verification failed. Please try again.');
 
-    // ---- 2. Required-field validation ----
     const fieldErr = validateApplicationFields({
       vacancy_id: vacancyId,
       candidate_name: candidateName,
@@ -60,7 +58,6 @@ export async function onRequestPost({ request, env }) {
     });
     if (fieldErr) return validationError(fieldErr);
 
-    // ---- 3. Vacancy must exist, be Open, and not be past its deadline ----
     const vacancy = await first(env, 'SELECT * FROM vacancies WHERE id = ?', [vacancyId]);
     if (!vacancy) return notFound('This vacancy could not be found.');
 
@@ -70,7 +67,6 @@ export async function onRequestPost({ request, env }) {
       return conflict('applications_closed', 'Applications for this position have closed.');
     }
 
-    // ---- 4. CV validation (extension AND MIME type; size; emptiness) ----
     const resumeErr = validateResumeFile(resumeFile);
     if (resumeErr) {
       if (resumeErr.code === 'too_large') return tooLarge(resumeErr.message);
@@ -78,7 +74,6 @@ export async function onRequestPost({ request, env }) {
       return validationError(resumeErr.message);
     }
 
-    // ---- 5. Generate id, upload to R2, then insert into D1 ----
     const id = newId();
     const resumeKey = buildResumeKey(id, resumeFile.name);
 
@@ -103,11 +98,23 @@ export async function onRequestPost({ request, env }) {
         timestamp, timestamp, timestamp
       ]);
     } catch (err) {
-      // D1 insert failed after a successful R2 upload — delete the now-orphaned object.
       console.error('D1 insert failed after R2 upload, cleaning up:', err && err.message);
       await deleteResume(env, resumeKey);
       return internalErrorFallback();
     }
+
+    deferEmail(context, notifyNewApplication(env, {
+      application: {
+        id,
+        candidate_name: candidateName,
+        email: candidateEmail,
+        phone,
+        linkedin_url: linkedinUrl || null,
+        cover_note: coverNote || null,
+        applied_at: timestamp
+      },
+      vacancy
+    }));
 
     return created({ id, status: 'Applied' });
   });

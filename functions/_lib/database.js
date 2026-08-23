@@ -1,4 +1,8 @@
 // Small D1 helpers. IDs and timestamps are generated server-side.
+// The first database operation also ensures the initial schema exists in a
+// newly-bound D1 database. See functions/_lib/schema.js and migrations/0001_initial.sql.
+
+import { ensureSchema } from './schema.js';
 
 export function newId() {
   return crypto.randomUUID();
@@ -20,22 +24,26 @@ export function getCurrentBusinessDate(env) {
 }
 
 export async function all(env, sql, params = []) {
+  await ensureSchema(env);
   const stmt = env.DB.prepare(sql).bind(...params);
   const res = await stmt.all();
   return res.results || [];
 }
 
 export async function first(env, sql, params = []) {
+  await ensureSchema(env);
   const stmt = env.DB.prepare(sql).bind(...params);
   return await stmt.first();
 }
 
 export async function run(env, sql, params = []) {
+  await ensureSchema(env);
   const stmt = env.DB.prepare(sql).bind(...params);
   return await stmt.run();
 }
 
 export async function paginate(env, { table, whereSql = '1=1', whereParams = [], orderBy = 'created_at DESC', page = 1, limit = 25 }) {
+  await ensureSchema(env);
   page = Math.max(1, parseInt(page, 10) || 1);
   limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 25));
   const offset = (page - 1) * limit;

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Static sitemap for public marketing pages only. Per-vacancy URLs
+  (vacancy.html?id=...) are intentionally NOT listed here because vacancy
+  availability changes frequently (Open/Closed/Draft) and this is a static
+  file that cannot be regenerated automatically on every publish/close
+  action. A production deployment should generate this file dynamically
+  from the vacancies table, including only status=Open records, each time
+  a vacancy is published or closed (see README.md, SEO section).
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>/index.html</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>/vacancies.html</loc><changefreq>daily</changefreq><priority>0.9</priority></url>
+  <url><loc>/for-candidates.html</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>/for-employers.html</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>/privacy.html</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+</urlset>

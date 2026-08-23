@@ -1,0 +1,75 @@
+# ============================================================================
+# Copy this file to `wrangler.toml` in a real Cloudflare account (outside
+# this GenSpark editor) and fill in the placeholder values before running
+# `wrangler pages dev` / `wrangler pages deploy`. See DEPLOYMENT.md for the
+# full setup procedure.
+#
+# Do NOT put secrets (TURNSTILE_SECRET_KEY, GOOGLE_CLIENT_SECRET, etc.) in
+# this file — set them with `wrangler pages secret put <NAME>` (production)
+# and via the Cloudflare Pages dashboard "Preview" environment variables
+# (preview), never committed to source control.
+# ============================================================================
+
+name = "rbp-recruitment"
+compatibility_date = "2024-09-23"
+pages_build_output_dir = "."
+
+# ----------------------------------------------------------------------------
+# Production environment (default) — bound when deployed from the main branch
+# ----------------------------------------------------------------------------
+
+# Cloudflare D1 database binding used by functions/_lib/database.js as `env.DB`.
+# Create with: wrangler d1 create rbp-recruitment
+[[d1_databases]]
+binding = "DB"
+database_name = "rbp-recruitment"
+database_id = "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID"
+
+# Cloudflare R2 bucket binding used by functions/_lib/files.js as `env.CV_BUCKET`.
+# Create with: wrangler r2 bucket create rbp-recruitment-cvs
+# Must remain PRIVATE — no public development URL, no public custom domain,
+# no permanent public URLs generated anywhere in this codebase.
+[[r2_buckets]]
+binding = "CV_BUCKET"
+bucket_name = "rbp-recruitment-cvs"
+
+# Plain (non-secret) environment variables.
+# Firebase web config values (apiKey, authDomain, appId) are NOT secrets and
+# are set directly in login.html / admin.html, not here.
+# TURNSTILE_SITE_KEY (public) is also set directly in the public HTML forms.
+[vars]
+FIREBASE_PROJECT_ID = "REPLACE_WITH_FIREBASE_PROJECT_ID"
+BUSINESS_TIMEZONE = "Australia/Perth"
+
+# Secrets — DO NOT set values here. Set them out-of-band with:
+#   wrangler pages secret put TURNSTILE_SECRET_KEY
+#
+# Required secret (referenced by functions/_lib/turnstile.js):
+#   TURNSTILE_SECRET_KEY   Cloudflare Turnstile secret key (server-side verify)
+#
+# No Gmail/email secrets are required in this build — email notifications
+# were out of scope for this specification revision (see README.md /
+# PRELAUNCH_BLOCKERS.md for confirmation of current scope).
+
+# ----------------------------------------------------------------------------
+# Preview environment — bound for non-production branches / PR previews.
+# Uses a SEPARATE D1 database so preview deploys never read or write real
+# candidate/employer data (spec item 3/59).
+# Create with: wrangler d1 create rbp-recruitment-preview
+# ----------------------------------------------------------------------------
+[env.preview]
+
+[[env.preview.d1_databases]]
+binding = "DB"
+database_name = "rbp-recruitment-preview"
+database_id = "REPLACE_WITH_PREVIEW_D1_DATABASE_ID"
+
+[[env.preview.r2_buckets]]
+binding = "CV_BUCKET"
+bucket_name = "rbp-recruitment-cvs-preview"
+
+[env.preview.vars]
+FIREBASE_PROJECT_ID = "REPLACE_WITH_FIREBASE_PROJECT_ID"
+BUSINESS_TIMEZONE = "Australia/Perth"
+# Preview secrets are set the same way, scoped to the preview environment:
+#   wrangler pages secret put TURNSTILE_SECRET_KEY --env preview

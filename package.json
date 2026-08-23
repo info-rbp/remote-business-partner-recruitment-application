@@ -1,0 +1,29 @@
+{
+  "name": "rbp-recruitment",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remote Business Partner recruitment website — Cloudflare Pages + Pages Functions + D1 + private R2 + Firebase Authentication + Cloudflare Turnstile. See DEPLOYMENT.md for the full setup/deploy procedure and PRELAUNCH_BLOCKERS.md for items that must be resolved before real candidate/employer data is collected.",
+  "type": "module",
+  "scripts": {
+    "prelaunch": "node scripts/prelaunch-check.mjs",
+    "dev": "wrangler pages dev . --d1=DB --r2=CV_BUCKET --compatibility-date=2024-09-23",
+    "db:migrate:local": "wrangler d1 migrations apply rbp-recruitment --local",
+    "db:migrate:remote": "wrangler d1 migrations apply rbp-recruitment --remote",
+    "deploy": "npm run prelaunch && wrangler pages deploy ."
+  },
+  "dependencies": {
+    "jose": "^5.6.3"
+  },
+  "devDependencies": {
+    "wrangler": "^3.78.0"
+  },
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "notes": [
+    "jose is required by functions/_lib/auth.js to cryptographically verify Firebase-issued RS256 ID tokens against Google's published JWKS (spec item 27). Raw ASN.1/X.509 parsing was deliberately NOT hand-rolled.",
+    "wrangler is required to run D1 migrations, emulate D1/R2 locally (`npm run dev`), and deploy (`npm run deploy`).",
+    "This package.json has never been installed or run inside the GenSpark editor that produced this code — the editor has no tool that can execute npm install, wrangler, or any build/deploy command. Run `npm install` yourself in a real Node.js + Wrangler environment before using any of these scripts.",
+    "`npm run deploy` intentionally runs the prelaunch check first and aborts the deploy if it fails."
+  ]
+}

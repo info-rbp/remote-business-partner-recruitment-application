@@ -95,6 +95,31 @@ const RbpApi = (() => {
     return publicConfigPromise;
   }
 
+  function normaliseTurnstileErrorCode(code) {
+    return String(code == null ? '' : code).trim();
+  }
+
+  function describeTurnstileError(code, hostname = window.location.hostname) {
+    const value = normaliseTurnstileErrorCode(code);
+
+    if (value === 'hostname_not_allowed_by_server_config' || value.startsWith('110200')) {
+      return `Verification is not authorised for ${hostname}. Remote Business Partner needs to add this hostname to the Turnstile widget's Hostname Management settings.`;
+    }
+    if (value.startsWith('110100') || value.startsWith('110110') || value.startsWith('400020') || value.startsWith('400070')) {
+      return 'The website verification key is not valid or is disabled. Please contact Remote Business Partner.';
+    }
+    if (value.startsWith('200500')) {
+      return 'The verification service could not load completely. Check browser extensions or network filtering that may block challenges.cloudflare.com, then retry.';
+    }
+    if (value.startsWith('110600') || value.startsWith('110620')) {
+      return 'The verification challenge timed out. Please retry the verification.';
+    }
+    if (value.startsWith('300') || value.startsWith('600')) {
+      return 'The security check could not be completed. Refresh the page or try another browser/network and retry.';
+    }
+    return 'The verification service could not complete the security check. Please retry or contact Remote Business Partner.';
+  }
+
   function renderTurnstile(containerId, action, handlers = {}) {
     const container = document.getElementById(containerId);
     const defaultActions = {
@@ -126,6 +151,20 @@ const RbpApi = (() => {
         throw new Error('Turnstile site key is not configured.');
       }
 
+      const configuredHostnames = Array.isArray(config.turnstileAllowedHostnames)
+        ? config.turnstileAllowedHostnames.filter(Boolean)
+        : [];
+      const currentHostname = window.location.hostname;
+      if (configuredHostnames.length && !configuredHostnames.includes(currentHostname)) {
+        const code = 'hostname_not_allowed_by_server_config';
+        container.dataset.turnstileError = code;
+        container.dataset.turnstileUnconfigured = '1';
+        const message = describeTurnstileError(code, currentHostname);
+        container.innerHTML = `<p class="text-xs text-red-600 text-center">${message}</p>`;
+        if (typeof handlers.onError === 'function') handlers.onError(code);
+        throw new Error(message);
+      }
+
       return new Promise((resolve, reject) => {
         let attempts = 0;
         const tryRender = () => {
@@ -151,10 +190,11 @@ const RbpApi = (() => {
                   if (typeof handlers.onTimeout === 'function') handlers.onTimeout();
                 },
                 'error-callback': code => {
+                  const normalised = normaliseTurnstileErrorCode(code) || 'unknown';
                   turnstileWidgetTokens[containerId] = '';
-                  container.dataset.turnstileError = String(code || 'unknown');
-                  console.error(`Turnstile error in ${containerId}:`, code);
-                  if (typeof handlers.onError === 'function') handlers.onError(code);
+                  container.dataset.turnstileError = normalised;
+                  console.error(`Turnstile error in ${containerId}:`, normalised, describeTurnstileError(normalised));
+                  if (typeof handlers.onError === 'function') handlers.onError(normalised);
                 }
               };
               if (action) options.action = action;
@@ -180,7 +220,7 @@ const RbpApi = (() => {
       });
     }).catch(err => {
       console.error('Unable to load or render Turnstile:', err);
-      if (!container.dataset.turnstileUnconfigured) {
+      if (!container.dataset.turnstileUnconfigured && !container.dataset.turnstileError) {
         container.innerHTML = '<p class="text-xs text-red-500">Verification could not be loaded. Please refresh the page and try again.</p>';
       }
       throw err;
@@ -193,6 +233,16 @@ const RbpApi = (() => {
   function isTurnstileConfigured(containerId) {
     const container = document.getElementById(containerId);
     return !(container && container.dataset.turnstileUnconfigured === '1');
+  }
+
+  function getTurnstileError(containerId) {
+    const container = document.getElementById(containerId);
+    return container ? (container.dataset.turnstileError || '') : '';
+  }
+
+  function getTurnstileErrorMessage(containerId) {
+    const code = getTurnstileError(containerId);
+    return code ? describeTurnstileError(code) : '';
   }
 
   function getTurnstileToken(containerId) {
@@ -372,6 +422,7 @@ const RbpApi = (() => {
     getVacancies, getVacancy,
     submitApplication, submitCandidateInterest, submitRecruitmentRequest,
     renderTurnstile, getTurnstileToken, resetTurnstile, isTurnstileConfigured,
+    getTurnstileError, getTurnstileErrorMessage, describeTurnstileError,
     initFirebaseAuth, isFirebaseConfigured, onAuthStateChanged, signIn, signOutStaff, sendPasswordReset, getIdToken,
     adminFetch, adminGetSession,
     adminGetVacancies, adminCreateVacancy, adminUpdateVacancy, adminDeleteVacancy,

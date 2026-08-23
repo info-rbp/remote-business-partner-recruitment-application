@@ -5,13 +5,22 @@
    file, and none must ever be added (see PRELAUNCH_BLOCKERS.md and
    scripts/prelaunch-check.mjs, which fails the build if tables/* calls
    are reintroduced).
+
+   Depends on (loaded before this file, where needed):
+     - js/firebase-config.js  (FIREBASE_CONFIG)         — admin/login pages only
+     - /api/config runtime response (TURNSTILE_SITE_KEY from Cloudflare) — public form pages only
+     - Firebase compat SDK (firebase-app-compat.js, firebase-auth-compat.js) — admin/login pages only
+     - Cloudflare Turnstile script (challenges.cloudflare.com/turnstile/v0/api.js) — public form pages only
    =========================================================== */
 
 const RbpApi = (() => {
+
+  // ---------- Low-level request helpers ----------
+
   async function request(path, options = {}) {
     const res = await fetch(path, options);
     let body = null;
-    try { body = await res.json(); } catch (e) { }
+    try { body = await res.json(); } catch (e) { /* no JSON body, e.g. 204 */ }
     if (!res.ok) {
       const err = new Error((body && body.message) || `Request failed with status ${res.status}.`);
       err.status = res.status;
@@ -30,6 +39,8 @@ const RbpApi = (() => {
     return s ? `?${s}` : '';
   }
 
+  // ---------- Public: vacancies ----------
+
   async function getVacancies(params = {}) {
     const json = await request(`api/vacancies${toQuery(params)}`);
     return json.data || [];
@@ -40,10 +51,14 @@ const RbpApi = (() => {
     return json.data;
   }
 
+  // ---------- Public: applications (multipart) ----------
+
   async function submitApplication(formData) {
     const json = await request('api/applications', { method: 'POST', body: formData });
     return json.data;
   }
+
+  // ---------- Public: candidate interest / recruitment requests (JSON) ----------
 
   async function submitCandidateInterest(payload) {
     const json = await request('api/candidate-interest', {
@@ -63,26 +78,55 @@ const RbpApi = (() => {
     return json.data;
   }
 
-  const turnstileWidgetIds = {};
+  // ---------- Cloudflare Turnstile ----------
 
-  function renderTurnstile(containerId) {
-    const siteKey = (typeof TURNSTILE_SITE_KEY !== 'undefined') ? TURNSTILE_SITE_KEY : null;
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    if (!siteKey || siteKey === 'REPLACE_ME') {
-      container.innerHTML = '<p class="text-xs text-red-500">Form protection is not yet configured for this site (missing Turnstile site key). This form cannot be submitted until deployment configuration is complete.</p>';
-      container.dataset.turnstileUnconfigured = '1';
-      return;
+  const turnstileWidgetIds = {};
+  let publicConfigPromise = null;
+
+  async function getPublicConfig() {
+    if (!publicConfigPromise) {
+      publicConfigPromise = request('api/config').then(json => json.data || {}).catch(err => {
+        publicConfigPromise = null;
+        throw err;
+      });
     }
-    const tryRender = () => {
-      if (window.turnstile && window.turnstile.render) {
-        const id = window.turnstile.render(`#${containerId}`, { sitekey: siteKey });
-        turnstileWidgetIds[containerId] = id;
-      } else {
-        setTimeout(tryRender, 150);
-      }
+    return publicConfigPromise;
+  }
+
+  function renderTurnstile(containerId, action) {
+    const container = document.getElementById(containerId);
+    const defaultActions = {
+      applyTurnstile: 'job_application',
+      riTurnstile: 'candidate_interest',
+      auTurnstile: 'recruitment_request'
     };
-    tryRender();
+    action = action || defaultActions[containerId] || undefined;
+    if (!container) return;
+    delete container.dataset.turnstileUnconfigured;
+
+    getPublicConfig().then(config => {
+      const siteKey = config.turnstileSiteKey || null;
+      if (!siteKey) {
+        container.innerHTML = '<p class="text-xs text-red-500">Form protection is temporarily unavailable. Please contact Remote Business Partner if you need assistance.</p>';
+        container.dataset.turnstileUnconfigured = '1';
+        return;
+      }
+      const tryRender = () => {
+        if (window.turnstile && window.turnstile.render) {
+          const options = { sitekey: siteKey, theme: 'auto' };
+          if (action) options.action = action;
+          const id = window.turnstile.render(`#${containerId}`, options);
+          turnstileWidgetIds[containerId] = id;
+        } else {
+          setTimeout(tryRender, 150);
+        }
+      };
+      tryRender();
+    }).catch(err => {
+      console.error('Unable to load public Turnstile configuration:', err);
+      container.innerHTML = '<p class="text-xs text-red-500">Form protection is temporarily unavailable. Please contact Remote Business Partner if you need assistance.</p>';
+      container.dataset.turnstileUnconfigured = '1';
+    });
   }
 
   function isTurnstileConfigured(containerId) {
@@ -92,7 +136,7 @@ const RbpApi = (() => {
 
   function getTurnstileToken(containerId) {
     if (window.turnstile && turnstileWidgetIds[containerId] !== undefined) {
-      try { return window.turnstile.getResponse(turnstileWidgetIds[containerId]) || ''; } catch (e) { }
+      try { return window.turnstile.getResponse(turnstileWidgetIds[containerId]) || ''; } catch (e) { /* fall through */ }
     }
     const input = document.querySelector(`#${containerId} input[name="cf-turnstile-response"]`);
     return input ? input.value : '';
@@ -100,9 +144,11 @@ const RbpApi = (() => {
 
   function resetTurnstile(containerId) {
     if (window.turnstile && turnstileWidgetIds[containerId] !== undefined) {
-      try { window.turnstile.reset(turnstileWidgetIds[containerId]); } catch (e) { }
+      try { window.turnstile.reset(turnstileWidgetIds[containerId]); } catch (e) { /* ignore */ }
     }
   }
+
+  // ---------- Firebase Authentication (staff only) ----------
 
   let firebaseInitialized = false;
 
@@ -151,6 +197,8 @@ const RbpApi = (() => {
     return user.getIdToken(forceRefresh);
   }
 
+  // ---------- Admin: authenticated fetch helper ----------
+
   async function adminFetch(path, options = {}) {
     const token = await getIdToken();
     if (!token) {
@@ -166,6 +214,8 @@ const RbpApi = (() => {
     const json = await adminFetch('api/admin/session');
     return json.data;
   }
+
+  // ---------- Admin: vacancies ----------
 
   async function adminGetVacancies() {
     const json = await adminFetch('api/admin/vacancies');
@@ -187,6 +237,8 @@ const RbpApi = (() => {
     await adminFetch(`api/admin/vacancies/${encodeURIComponent(id)}`, { method: 'DELETE' });
     return true;
   }
+
+  // ---------- Admin: applications ----------
 
   async function adminGetApplications(params = {}) {
     return adminFetch(`api/admin/applications${toQuery(params)}`);
@@ -223,6 +275,8 @@ const RbpApi = (() => {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 
+  // ---------- Admin: recruitment requests ----------
+
   async function adminGetRecruitmentRequests(params = {}) {
     return adminFetch(`api/admin/recruitment-requests${toQuery(params)}`);
   }
@@ -232,6 +286,8 @@ const RbpApi = (() => {
     });
     return json.data;
   }
+
+  // ---------- Admin: candidate interest ----------
 
   async function adminGetCandidateInterest(params = {}) {
     return adminFetch(`api/admin/candidate-interest${toQuery(params)}`);

@@ -1,69 +1,86 @@
 # Pre-Launch Blockers — Remote Business Partner
 
-This document lists everything that must be resolved by Remote Business
-Partner and/or a developer with Cloudflare + Firebase access **before** this
-application can truthfully be called production-ready.
+This document records the remaining production checks for the Remote Business
+Partner recruitment application. The public site is deployed on Cloudflare
+Pages, but real candidate/employer data should only be collected after the
+items below are verified.
 
-## 1. Business/legal information not yet supplied
+## 1. Privacy and business details
 
-The Privacy Policy (`privacy.html`) intentionally does **not** invent any of
-the following. Until they are supplied by Remote Business Partner (with
-legal review as appropriate), the policy contains explicit "Deployment gap"
-callouts instead of guessing:
+`privacy.html` now contains a recruitment-specific privacy policy covering:
 
-- [ ] Legal entity name
-- [ ] ABN (Australian Business Number)
-- [ ] Registered postal/business address
-- [ ] Telephone number if one is to be published
-- [ ] Confirmed data retention period for candidate/employer records
-- [ ] Any international data-transfer disclosures, if applicable
+- candidate applications and CVs
+- candidate registrations / expressions of interest
+- employer recruitment requests
+- prospective-employer disclosure
+- cloud service providers
+- information security
+- access, correction and deletion requests
+- a general 24-month candidate retention practice
+- human-led recruitment and no automated recruitment decisions
 
-**Until these are supplied, the Privacy Policy is not final and this site
-must not be used to collect real candidate or employer personal data.**
+Before the final branded production launch, confirm that **Remote Business
+Partner** is the correct public identity for the service. Add any legal entity
+name, ABN, business address or telephone number that RBP chooses or is required
+to publish. Review the policy whenever recruitment practices, service
+providers, retention practices or applicable privacy requirements materially
+change.
 
-## 2. Cloudflare infrastructure not yet provisioned
+## 2. Cloudflare infrastructure to verify
 
-- [ ] Create the production D1 database (`rbp-recruitment`) and a separate
-      preview database; apply `migrations/0001_initial.sql` to both
-- [ ] Create the private R2 bucket (`rbp-recruitment-cvs`); confirm public
-      access, public development URL, and public custom domain are all disabled
-- [ ] Bind `DB` and `CV_BUCKET` in the real `wrangler.toml`
-- [ ] Create a Cloudflare Turnstile widget; set the public site key and
-      `TURNSTILE_SECRET_KEY` as a Cloudflare Pages secret
-- [ ] Set `FIREBASE_PROJECT_ID` and `BUSINESS_TIMEZONE`
-- [ ] Deploy via Git-connected Pages project or Wrangler
+- [ ] Production D1 database exists and `migrations/0001_initial.sql` has been applied
+- [ ] Preview/testing uses a separate D1 database where practical
+- [ ] Private R2 bucket (`rbp-recruitment-cvs`) exists
+- [ ] R2 public access, public development URL and public custom domain are disabled
+- [ ] Pages binding `DB` points to the production D1 database
+- [ ] Pages binding `CV_BUCKET` points to the private CV bucket
+- [ ] `BUSINESS_TIMEZONE=Australia/Perth`
+- [ ] `TURNSTILE_SITE_KEY` is configured as a normal Pages environment variable
+- [ ] `TURNSTILE_SECRET_KEY` is configured as a Pages secret
+- [ ] `TURNSTILE_ALLOWED_HOSTNAMES` contains the approved production hostname(s)
+- [ ] Turnstile widget uses Managed mode and is registered for the production hostname
 
-## 3. Firebase project not yet configured
+## 3. Firebase staff authentication
 
 - [ ] Create/configure the Firebase project
-- [ ] Enable Email/Password sign-in only
-- [ ] Add production and preview Cloudflare domains to Authorized domains
+- [ ] Enable Email/Password sign-in
+- [ ] Replace the `REPLACE_ME` values in `js/firebase-config.js`
+- [ ] Set `FIREBASE_PROJECT_ID` in Cloudflare to the same Firebase project ID
+- [ ] Add the Cloudflare production/custom domain to Firebase Authorized domains
 - [ ] Manually create approved staff users
-- [ ] Record each Firebase UID
-- [ ] Insert a matching row into `staff_users` for each approved UID
+- [ ] Insert each approved Firebase UID into `staff_users`
 - [ ] Test approved and unapproved account behaviour
 - [ ] Test password reset and sign-out
 
-## 4. Acceptance tests not yet run against a real deployment
+## 4. Acceptance tests
 
-- [ ] Authentication acceptance tests: no token / garbage token / unapproved
-      Firebase user / inactive staff / valid approved staff
-- [ ] Public vacancy security tests: only Open+current vacancies returned;
-      Draft/Closed/expired all 404 on direct access; no internal fields leak
-- [ ] Application security tests: Turnstile, vacancy state/deadline, CV type
-      and size, consent, D1 row and R2 object
-- [ ] CV security tests: private R2, authenticated download only, no CV bytes
-      in list responses
-- [ ] Public form tests for Candidate Interest and Recruitment Request
-- [ ] Full admin end-to-end workflow from draft vacancy through close
+- [ ] No-token admin API request returns 401
+- [ ] Invalid Firebase token returns 401
+- [ ] Valid Firebase account not listed in `staff_users` returns 403
+- [ ] Approved staff user can load Admin
+- [ ] Public vacancy API returns only Open and unexpired vacancies
+- [ ] Draft, Closed and expired vacancies are not publicly accessible
+- [ ] Public vacancy response does not expose `employer_name` or staff-only fields
+- [ ] Job application requires a valid Turnstile `job_application` token
+- [ ] Candidate registration requires a valid Turnstile `candidate_interest` token
+- [ ] Employer request requires a valid Turnstile `recruitment_request` token
+- [ ] Wrong Turnstile action is rejected
+- [ ] Wrong Turnstile hostname is rejected when hostname allowlisting is configured
+- [ ] CV upload rejects unsupported files and files larger than 5 MB
+- [ ] CV objects are not publicly accessible from R2
+- [ ] Approved staff can download a CV through the authenticated API
+- [ ] Privacy acknowledgement is stored for all public submissions
+- [ ] Full workflow passes: create Draft → publish → apply → review → close
 
-## 5. Scope note: email notifications
+## 5. Email notifications
 
-This build does **not** send email notifications on submission. If RBP wants
-candidate/staff email notifications, that is a new feature request to be
-scoped and approved separately.
+This build still does **not** send email notifications when a new application,
+candidate registration or employer recruitment request is submitted. This is
+not required for the website to function, but it is recommended before active
+recruitment so staff do not need to continuously check the dashboard.
 
-## 6. This list is not exhaustive by design
+## 6. Ongoing maintenance
 
-New blockers discovered during real deployment should be added here as they're
-found, not silently worked around.
+New blockers discovered during production use should be recorded here rather
+than silently worked around. Keep Cloudflare, Firebase and dependency settings
+under review as the application evolves.

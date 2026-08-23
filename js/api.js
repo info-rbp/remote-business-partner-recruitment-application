@@ -81,6 +81,8 @@ const RbpApi = (() => {
   // ---------- Cloudflare Turnstile ----------
 
   const turnstileWidgetIds = {};
+  const turnstileWidgetTokens = {};
+  const turnstileRenderPromises = {};
   let publicConfigPromise = null;
 
   async function getPublicConfig() {
@@ -93,7 +95,7 @@ const RbpApi = (() => {
     return publicConfigPromise;
   }
 
-  function renderTurnstile(containerId, action) {
+  function renderTurnstile(containerId, action, handlers = {}) {
     const container = document.getElementById(containerId);
     const defaultActions = {
       applyTurnstile: 'job_application',
@@ -101,32 +103,91 @@ const RbpApi = (() => {
       auTurnstile: 'recruitment_request'
     };
     action = action || defaultActions[containerId] || undefined;
-    if (!container) return;
-    delete container.dataset.turnstileUnconfigured;
+    if (!container) return Promise.resolve(null);
 
-    getPublicConfig().then(config => {
+    delete container.dataset.turnstileUnconfigured;
+    delete container.dataset.turnstileError;
+
+    if (turnstileWidgetIds[containerId] !== undefined) {
+      const token = getTurnstileToken(containerId);
+      if (token && typeof handlers.onSuccess === 'function') {
+        queueMicrotask(() => handlers.onSuccess(token));
+      }
+      return Promise.resolve(turnstileWidgetIds[containerId]);
+    }
+
+    if (turnstileRenderPromises[containerId]) return turnstileRenderPromises[containerId];
+
+    const renderPromise = getPublicConfig().then(config => {
       const siteKey = config.turnstileSiteKey || null;
       if (!siteKey) {
         container.innerHTML = '<p class="text-xs text-red-500">Form protection is temporarily unavailable. Please contact Remote Business Partner if you need assistance.</p>';
         container.dataset.turnstileUnconfigured = '1';
-        return;
+        throw new Error('Turnstile site key is not configured.');
       }
-      const tryRender = () => {
-        if (window.turnstile && window.turnstile.render) {
-          const options = { sitekey: siteKey, theme: 'auto' };
-          if (action) options.action = action;
-          const id = window.turnstile.render(`#${containerId}`, options);
-          turnstileWidgetIds[containerId] = id;
-        } else {
-          setTimeout(tryRender, 150);
-        }
-      };
-      tryRender();
+
+      return new Promise((resolve, reject) => {
+        let attempts = 0;
+        const tryRender = () => {
+          if (window.turnstile && window.turnstile.render) {
+            try {
+              const options = {
+                sitekey: siteKey,
+                theme: 'auto',
+                size: 'flexible',
+                retry: 'auto',
+                'refresh-expired': 'auto',
+                callback: token => {
+                  turnstileWidgetTokens[containerId] = token || '';
+                  delete container.dataset.turnstileError;
+                  if (typeof handlers.onSuccess === 'function') handlers.onSuccess(token || '');
+                },
+                'expired-callback': () => {
+                  turnstileWidgetTokens[containerId] = '';
+                  if (typeof handlers.onExpired === 'function') handlers.onExpired();
+                },
+                'timeout-callback': () => {
+                  turnstileWidgetTokens[containerId] = '';
+                  if (typeof handlers.onTimeout === 'function') handlers.onTimeout();
+                },
+                'error-callback': code => {
+                  turnstileWidgetTokens[containerId] = '';
+                  container.dataset.turnstileError = String(code || 'unknown');
+                  console.error(`Turnstile error in ${containerId}:`, code);
+                  if (typeof handlers.onError === 'function') handlers.onError(code);
+                }
+              };
+              if (action) options.action = action;
+              const id = window.turnstile.render(`#${containerId}`, options);
+              turnstileWidgetIds[containerId] = id;
+              resolve(id);
+            } catch (err) {
+              container.dataset.turnstileError = 'render_failed';
+              reject(err);
+            }
+            return;
+          }
+
+          attempts += 1;
+          if (attempts >= 100) {
+            container.dataset.turnstileError = 'script_unavailable';
+            reject(new Error('Turnstile script did not become available.'));
+            return;
+          }
+          setTimeout(tryRender, 100);
+        };
+        tryRender();
+      });
     }).catch(err => {
-      console.error('Unable to load public Turnstile configuration:', err);
-      container.innerHTML = '<p class="text-xs text-red-500">Form protection is temporarily unavailable. Please contact Remote Business Partner if you need assistance.</p>';
-      container.dataset.turnstileUnconfigured = '1';
+      console.error('Unable to load or render Turnstile:', err);
+      if (!container.dataset.turnstileUnconfigured) {
+        container.innerHTML = '<p class="text-xs text-red-500">Verification could not be loaded. Please refresh the page and try again.</p>';
+      }
+      throw err;
     });
+
+    turnstileRenderPromises[containerId] = renderPromise;
+    return renderPromise;
   }
 
   function isTurnstileConfigured(containerId) {
@@ -135,14 +196,22 @@ const RbpApi = (() => {
   }
 
   function getTurnstileToken(containerId) {
+    if (turnstileWidgetTokens[containerId]) return turnstileWidgetTokens[containerId];
     if (window.turnstile && turnstileWidgetIds[containerId] !== undefined) {
-      try { return window.turnstile.getResponse(turnstileWidgetIds[containerId]) || ''; } catch (e) { /* fall through */ }
+      try {
+        const token = window.turnstile.getResponse(turnstileWidgetIds[containerId]) || '';
+        if (token) turnstileWidgetTokens[containerId] = token;
+        return token;
+      } catch (e) { /* fall through */ }
     }
     const input = document.querySelector(`#${containerId} input[name="cf-turnstile-response"]`);
     return input ? input.value : '';
   }
 
   function resetTurnstile(containerId) {
+    turnstileWidgetTokens[containerId] = '';
+    const container = document.getElementById(containerId);
+    if (container) delete container.dataset.turnstileError;
     if (window.turnstile && turnstileWidgetIds[containerId] !== undefined) {
       try { window.turnstile.reset(turnstileWidgetIds[containerId]); } catch (e) { /* ignore */ }
     }

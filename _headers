@@ -11,3 +11,24 @@
   Permissions-Policy: geolocation=(), camera=(), microphone=()
   X-Frame-Options: DENY
   Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://www.gstatic.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+
+# Staff/auth surfaces should always load the current deployment. These files
+# contain no candidate data; disabling browser/CDN caching here prevents stale
+# Firebase configuration or admin JavaScript from surviving a production deploy.
+/admin.html
+  Cache-Control: no-store, max-age=0
+
+/login.html
+  Cache-Control: no-store, max-age=0
+
+/js/firebase-config.js
+  Cache-Control: no-store, max-age=0
+
+/js/login.js
+  Cache-Control: no-store, max-age=0
+
+/js/admin.js
+  Cache-Control: no-store, max-age=0
+
+/js/api.js
+  Cache-Control: no-cache, must-revalidate

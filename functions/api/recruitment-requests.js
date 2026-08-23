@@ -1,13 +1,14 @@
-// POST /api/recruitment-requests — public JSON endpoint (employer "Start
-// Recruitment" form; spec item 35, 43). No public GET — admin-only
-// retrieval lives under /api/admin/recruitment-requests.
+// POST /api/recruitment-requests — public JSON endpoint (employer "Start Recruitment" form).
+// No public GET — admin-only retrieval lives under /api/admin/recruitment-requests.
 
 import { newId, nowIso, run } from '../_lib/database.js';
 import { verifyTurnstile } from '../_lib/turnstile.js';
 import { validateRecruitmentRequestFields } from '../_lib/validation.js';
+import { notifyRecruitmentRequest, deferEmail } from '../_lib/email.js';
 import { created, validationError, forbidden, safeHandler } from '../_lib/responses.js';
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost(context) {
+  const { request, env } = context;
   return safeHandler(async () => {
     const body = await request.json().catch(() => ({}));
     const {
@@ -39,6 +40,21 @@ export async function onRequestPost({ request, env }) {
       location || null, remuneration || null, preferred_start_date || null, requirements || null,
       timestamp, timestamp, timestamp
     ]);
+
+    deferEmail(context, notifyRecruitmentRequest(env, {
+      id,
+      company_name,
+      contact_name,
+      email: contactEmail,
+      phone: phone || null,
+      position_title,
+      employment_type,
+      location: location || null,
+      remuneration: remuneration || null,
+      preferred_start_date: preferred_start_date || null,
+      requirements: requirements || null,
+      created_at: timestamp
+    }));
 
     return created({ id, status: 'New' });
   });
